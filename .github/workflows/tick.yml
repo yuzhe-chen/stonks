@@ -1,0 +1,43 @@
+name: tick
+# Moves the made-up market every five minutes: reads public news feeds, writes the data branch the game reads.
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: tick
+  cancel-in-progress: false
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Fetch the data branch
+        run: |
+          git fetch origin data --depth=1 || true
+          mkdir -p data
+          if git rev-parse --verify origin/data >/dev/null 2>&1; then git archive origin/data | tar -x -C data; fi
+      - name: Pause switch
+        run: |
+          if [ -f pause.txt ]; then echo "paused"; echo "PAUSED=1" >> "$GITHUB_ENV"; fi
+      - name: Tick
+        if: env.PAUSED != '1'
+        run: node scripts/tick.mjs data
+        env:
+          NO_NET: ${{ env.PAUSED == '1' && '1' || '' }}
+      - name: Publish the data branch (one commit, history is not kept)
+        run: |
+          cd data
+          rm -rf .git
+          git init -q -b data
+          git config user.name "stonks-bot"
+          git config user.email "stonks-bot@users.noreply.github.com"
+          git add -A
+          git commit -q -m "tick $(date -u +%FT%TZ)"
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" data:data
