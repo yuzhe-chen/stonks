@@ -272,6 +272,7 @@ function setRoute() {
   route = p[0]; arg = decodeURIComponent(p[1] || '');
   document.querySelectorAll('#tabs a').forEach(a => a.classList.toggle('on', a.dataset.v === (route === 'co' ? 'market' : route)));
   render(); window.scrollTo(0, 0);
+  const tabs = $('#tabs'), on = $('#tabs a.on'); if (tabs && on) tabs.scrollLeft = on.offsetLeft - (tabs.clientWidth - on.offsetWidth) / 2;
 }
 function chips(ev) {
   const out = [];
@@ -466,7 +467,7 @@ function vPortfolio() {
   const tot = posValue() || 1;
   const bag = hs.some(t => S.pos[t].sh * shown(t) <= S.pos[t].cost * 0.7);
   const shown_b = Object.keys(S.badges).map(k => `<span class="badge ${BADGES[k][1]}">${BADGES[k][0]}</span>`).join('') + (bag ? '<span class="badge shame">Bagholder</span>' : '');
-  main.innerHTML = `<h2>Portfolio</h2>${statusBanner()}<div class="huge ${l[1]}" id="pfladder">${l[0]}</div>
+  main.innerHTML = `<div class="rowflex ph"><h2>Portfolio</h2><div class="ladbox ${l[1]}" id="pfladder">${l[0]}</div></div><div class="pname">${esc(S.name)}</div>${statusBanner()}
   <div class="big"><div><div class="l">Net worth</div><div class="v" id="pfnw">${money(nw)}</div></div><div><div class="l">Return</div><div class="v ${cls(r)}" id="pfret">${pct(r)}</div></div>
     <div><div class="l">Cash</div><div class="v">${money(S.cash)}</div></div><div><div class="l">Invested</div><div class="v" id="pfinv">${money(posValue())}</div></div></div>
   ${hs.length ? `<table><thead><tr><th>Holding</th><th>Shares</th><th>Value</th><th>Gain</th></tr></thead><tbody>${hs.sort((a, b) => S.pos[b].sh * shown(b) - S.pos[a].sh * shown(a)).map(t => {
@@ -481,11 +482,9 @@ const BADGE_INFO = { jail: 'Go to jail over options debt.', rekt: 'Fall 25% belo
   brrr3: 'Claim 3 Brrr handouts.', basket: 'Hold stocks in 8 sectors at once.', martha: 'Get caught by the SEC.', tipster: 'Buy an insider tip.' };
 function vQuests() {
   const qs = quests(), lv = level(), cur = S.tendies, lo = lv * lv * 20, hi = (lv + 1) * (lv + 1) * 20, pc = Math.min(100, (cur - lo) / (hi - lo) * 100);
-  main.innerHTML = `<h2>Quests</h2>
-  <div class="card lvlcard"><div class="rowflex"><div><div class="gray">Level</div><div class="lvln">${lv}</div></div><div class="lvlt">${esc(title())}</div><div class="lvltn"><b>${cur.toLocaleString('en-US')}</b> tendies</div></div>
-    <div class="lvlbar"><b>${lv}</b><div class="meter"><i style="width:${pc}%"></i></div><b>${lv + 1}</b></div>
-    <div class="lvllbl"><span>${lo}</span><b>${cur} of ${hi}</b><span>${hi}</span></div>
-    <div class="titles">${TITLES.map((t, i) => `<span class="${i < lv ? 'past' : i === lv ? 'now' : ''}">${i}. ${esc(t)}</span>`).join('')}</div></div>
+  main.innerHTML = `<div class="rowflex ph"><h2>Quests</h2><div class="tnbox"><b id="metn">${cur.toLocaleString('en-US')}</b> tendies</div></div>
+  <div class="card lvlcard"><div class="gray">Level ${lv}</div><div class="lvlt">${esc(title())}</div>
+    <div class="meter big"><i style="width:${pc}%"></i></div><b>${cur} of ${hi}</b></div>
   <h3>Today</h3><div class="cards">${qs.map(q => questCard(q.t, q.d, q.r, q.pr, q.p, q.claimed, q.ok, 'data-claim="' + q.id + '"')).join('')}</div>
   <h3>Special quests</h3><div class="cards">${Object.keys(BADGES).map(k => { const got = !!S.badges[k]; return `<div class="card ${got ? 'got-' + BADGES[k][1] : ''}"><div class="card-h"><span class="qt">${BADGES[k][0]}</span><span class="reward">+30</span></div><div class="qd">${BADGE_INFO[k]}</div><div class="card-f"><span class="${got ? 'b' : ''}">${got ? 'Done' : 'Not yet'}</span></div></div>`; }).join('')}</div>
   <h3>Shop</h3><div class="cards">
@@ -538,10 +537,7 @@ function render() {
   renderMe(); renderTape();
 }
 function renderMe() {
-  const r = M ? ret() : 0, l = ladder(r), el = $('#me');
-  el.innerHTML = `<div class="nw" id="menw">${M ? money(netWorth()) : ''}</div><div class="ladder ${l[1]}" id="meladder">${M ? l[0] : ''}</div>
-  <div class="tn"><b id="metn">${S.tendies.toLocaleString('en-US')}</b> tendies</div>
-  <div class="who">${esc(S.name)} <button id="openset">Settings</button></div>`;
+  $('#me').innerHTML = `<div class="nw" id="menw">${M ? money(netWorth()) : ''}</div>`;
 }
 function applyTheme() {
   const t = S.theme || 'dark', dark = t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -689,7 +685,7 @@ function tick() {
   const a = $('#menw'); if (a) a.textContent = money(nw);
   const tn = $('#metn'); if (tn) tn.textContent = S.tendies.toLocaleString('en-US');
   const b = $('#meladder'); if (b) { b.textContent = l[0]; b.className = 'ladder ' + l[1]; }
-  const pn = $('#pfnw'); if (pn) { pn.textContent = money(nw); $('#pfret').textContent = pct(r); $('#pfret').className = 'v ' + cls(r); $('#pfladder').textContent = l[0]; $('#pfladder').className = 'huge ' + l[1]; $('#pfinv').textContent = money(posValue()); }
+  const pn = $('#pfnw'); if (pn) { pn.textContent = money(nw); $('#pfret').textContent = pct(r); $('#pfret').className = 'v ' + cls(r); $('#pfladder').textContent = l[0]; $('#pfladder').className = 'ladbox ' + l[1]; $('#pfinv').textContent = money(posValue()); }
   const tv = $('#tval'); if (tv && S.pos[arg]) tv.textContent = money(S.pos[arg].sh * shown(arg));
   if (S.cash < 0) S.cash *= 1 + 0.05 / 86400;
   if (settleOptions()) { renderMe(); if (route === 'portfolio' || route === 'feed') render(); }
