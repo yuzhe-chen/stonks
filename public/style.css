@@ -274,3 +274,6 @@ button,.btnlink{white-space:nowrap}
 .tabs a:first-child{margin-left:0;padding-left:var(--b)}
 @media (max-width:600px){:root,:root[data-theme]{--l:40px}}
 .bars .bb span:last-child{text-align:right}
+.tnbox{font-family:var(--head);font-size:var(--m);font-weight:700;text-transform:uppercase;line-height:1;color:var(--gray)}
+.tnbox b{color:var(--text);font-size:inherit;font-family:inherit}
+.tnbox{color:var(--text)}
