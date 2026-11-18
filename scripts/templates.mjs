@@ -109,3 +109,9 @@ export const SCHED = {
   earn: { label: 'Earnings', up: ['{co} reports earnings, says "cautiously optimistic" and means it', '{co} beats earnings, {ceo} thanks "the team", the team is one intern', '{co} posts a profit, auditors request a recount'],
     down: ['{co} reports earnings, {ceo} says "transitory" four times', '{co} misses earnings, blames "unprecedented normal conditions"', '{co} posts a loss, calls it "an investment in the future"'], dek: 'The call was forty minutes. The stock moved in four seconds.', more: ['Analysts asked three questions and nodded at the rest.', 'The slide deck had a rocket on it.'] },
 };
+
+SCHED.week = { label: 'Weekly showdown', up: ['Weekly showdown: the market surges and everyone claims they saw it coming', 'Weekly showdown ends in a rally, sector by sector, with exceptions'],
+  down: ['Weekly showdown: the market drops and everyone claims they saw it coming', 'Weekly showdown ends in a selloff, sector by sector, with exceptions'], dek: 'Sectors went in different directions, as they do.', more: ['Some portfolios will not be mentioned.', 'The group chat has gone quiet.'] };
+export const MANIP_UP = ['Buzz builds around {co}, nobody can say where it started', 'Anonymous posts say {co} is about to take off', 'Group chat decides {co} is the next big thing'];
+export const MANIP_DOWN = ['Rumor spreads that {co} has a problem, details unavailable', 'Anonymous posts say {co} is in trouble', 'Group chat decides {co} is finished'];
+export const MANIP_DEK = ['Posted by nobody in particular.', 'Source: a guy.', 'The post has been shared eleven thousand times.', 'Nobody has checked.'];

@@ -4,7 +4,7 @@ const REPO = 'yuzhe-chen/stonks';
 const LIVE = LOCAL ? ['/data/'] : [`https://raw.githubusercontent.com/${REPO}/data/`, `https://cdn.jsdelivr.net/gh/${REPO}@data/`];
 const COLD = LIVE;                                  // the CDN keeps branch files for 12 hours, so it is only the fallback
 const API = 'https://script.google.com/macros/s/AKfycbxYXFH6l7MikjO7xmTkDmKI95gPTzgykEAP8duVJvC9BEqBT5yaw5fhJU27R3Kl5a73/exec';   // accounts and the leaderboard (Apps Script, no Google permissions)
-const START = 10000, TIP_COST = 40, LAWYER = 60, BAIL = 150;
+const START = 10000, TIP_COST = 40, LAWYER = 60, BAIL = 150, FAST = 200, MANIP = 400, MANIP_LEVEL = 6;
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -15,7 +15,7 @@ const arrow = x => x >= 0 ? '▲' : '▼';
 const cls = x => x >= 0 ? 'up' : 'down';
 const hash = s => { let h = 2166136261; for (const c of String(s)) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0; return h; };
 function ago(t) { const s = Math.max(0, (Date.now() - t) / 1000); if (s < 60) return 'now'; if (s < 3600) return Math.floor(s / 60) + 'm ago'; if (s < 86400) return Math.floor(s / 3600) + 'h ago'; return Math.floor(s / 86400) + 'd ago'; }
-function countdown(ms) { if (ms <= 0) return 'now'; const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return (h ? h + 'h ' : '') + (h || m ? String(m).padStart(h ? 2 : 1, '0') + 'm ' : '') + String(x).padStart(2, '0') + 's'; }
+function countdown(ms) { if (ms <= 0) return 'now'; const t = Math.floor(ms / 1000), d = Math.floor(t / 86400), h = Math.floor(t % 86400 / 3600), m = Math.floor(t % 3600 / 60), x = t % 60; if (d >= 1) return d + 'd ' + h + 'h'; return (h ? h + 'h ' : '') + (h || m ? String(m).padStart(h ? 2 : 1, '0') + 'm ' : '') + String(x).padStart(2, '0') + 's'; }
 
 /* ---------- save ---------- */
 const KEY = 'stonks.v1';
@@ -111,8 +111,9 @@ function ladder(r) {
   if (r < 0.5) return ['Big Big Stonks', 'up'];
   return ['Big Big Big Stonks', 'up'];
 }
-const TITLES = ['Paper Hands', 'Group Chat Lurker', 'Probably Fine', 'Hot Take Specialist', 'Chart Astrologer', 'Gigabrain', 'Big Big Brain', 'Wen Lambo Owner'];
-const level = () => Math.floor(Math.sqrt(S.tendies / 20));
+const TITLES = ['Paper Hands', 'Group Chat Lurker', 'Probably Fine', 'Hot Take Specialist', 'Chart Astrologer', 'Gigabrain', 'Big Big Brain', 'When Lambo Owner'];
+const earn = n => { S.tendies += n; S.earned = (S.earned || 0) + n; };
+const level = () => { S.earned = Math.max(S.earned || 0, S.tendies); return Math.floor(Math.sqrt(S.earned / 20)); };
 const title = () => TITLES[Math.min(level(), TITLES.length - 1)];
 
 /* ---------- trading ---------- */
@@ -132,7 +133,7 @@ function trade(t, side, dollars, all) {
     if (p.sh < 1e-9) delete S.pos[t];
     S.trades.push({ t: Date.now(), tk: t, side, sh, px, chg: chg24(t) });
     const day = new Date().toISOString().slice(0, 10), g = d / basis - 1;
-    if (g >= 0.05 && (S.sells[day] || 0) < 3) { S.sells[day] = (S.sells[day] || 0) + 1; S.tendies += 10; }
+    if (g >= 0.05 && (S.sells[day] || 0) < 3) { S.sells[day] = (S.sells[day] || 0) + 1; earn(10); }
   }
   S.trades = S.trades.slice(-400);
   award(); save(); submitBoard();
@@ -142,7 +143,7 @@ function holdingAt(t, at) { let sh = 0; for (const x of S.trades) { if (x.t > at
 
 /* ---------- badges, quests ---------- */
 const BADGES = { jail: ['Jailbird', 'shame'], rekt: ['Rekt', 'shame'], bigbig: ['Big Big Stonks', 'on'], diamond: ['Diamond Hanz', 'on'], brrr3: ['Brrr Believer', 'on'], basket: ['Basket Case', 'on'], martha: ['Martha', 'shame'], tipster: ['Insider', 'on'] };
-function give(k) { if (!S.badges[k]) { S.badges[k] = Date.now(); S.tendies += 30; return true; } return false; }
+function give(k) { if (!S.badges[k]) { S.badges[k] = Date.now(); earn(30); return true; } return false; }
 function award() {
   const r = ret();
   if (r <= -0.25) give('rekt'); if (r >= 0.15) give('bigbig');
@@ -185,7 +186,7 @@ async function api(body) {
   try { const r = await fetch(API, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: JSON.stringify(body) }); return await r.json(); }
   catch (e) { return { error: 'net' }; }
 }
-const SYNC_KEYS = ['cash', 'dep', 'pos', 'tendies', 'claimed', 'brrr', 'badges', 'read', 'tips', 'sells', 'peak', 'fines', 'opts', 'optLog', 'jailUntil', 'donated', 'lawyers', 'lists', 'sorts'];
+const SYNC_KEYS = ['cash', 'dep', 'pos', 'tendies', 'claimed', 'brrr', 'badges', 'read', 'tips', 'sells', 'peak', 'fines', 'opts', 'optLog', 'jailUntil', 'donated', 'lawyers', 'lists', 'sorts', 'friends', 'fast', 'manip', 'earned', 'manipNext'];
 const b64 = u8 => btoa(String.fromCharCode(...u8)), unb64 = t => Uint8Array.from(atob(t), c => c.charCodeAt(0));
 async function packSave() {
   const o = {}; SYNC_KEYS.forEach(k => { o[k] = S[k]; });
@@ -290,6 +291,45 @@ function evHTML(ev) {
     ${brrrOK ? `<div class="chips"><button class="go" data-brrr="${esc(ev.id)}" data-amt="${ev.amt}">Claim ${money(ev.amt, 0)}</button></div>` : ev.kind === 'brrr' && S.brrr[ev.id] ? '<div class="dk">Claimed.</div>' : ''}
     </div></div>`;
 }
+let RANK = null, bdAt = 0;
+async function refreshBoard() {
+  if (!S.acct || Date.now() - bdAt < 120000) return; bdAt = Date.now();
+  const [rb, bots, pk] = await Promise.all([api({ op: 'board' }), getJSON(LIVE, 'bots.json'), api({ op: 'peek', names: [S.acct.u].concat(S.friends || []) })]);
+  if (!rb || !rb.ok) return;
+  BD = { real: rb.board || [], week: rb.week || [], wkEnd: rb.wkEnd || Date.now() + 864e5, bots: (bots && bots.rows) || [], peek: (pk && pk.people) || [] };
+  const wk = composeBoard('week'), me = wk.findIndex(r => r.u.toLowerCase() === S.acct.u.toLowerCase());
+  const fr = composeBoard('friends').filter(r => r.u.toLowerCase() !== S.acct.u.toLowerCase()).sort((a, b) => (b.wg || 0) - (a.wg || 0))[0];
+  RANK = { me: me + 1, of: wk.length, end: BD.wkEnd, friend: fr || null };
+  if (route === 'feed') render();
+}
+function nowHTML() {
+  const up = (E && E.upcoming || []).find(u => u.at > Date.now());
+  const cell = (k, v, href) => `<a class="nowc" href="${href}"><span class="gray">${k}</span><b>${v}</b></a>`;
+  return `<div class="nowrow">
+    ${RANK ? cell('Your rank this week', '#' + RANK.me + ' of ' + RANK.of, '#board') : cell('This week', 'Join the board', '#board')}
+    ${up ? cell('Next up', esc(up.label) + ' in <span data-cd="' + up.at + '">' + countdown(up.at - Date.now()) + '</span>', '#feed') : ''}
+    ${RANK && RANK.friend ? cell('Friend of the week', esc(RANK.friend.u) + ' ' + gainTxt(RANK.friend.wg || 0), '#board') : cell('Friends', 'Add some', '#board')}
+  </div>`;
+}
+function updateDots() { const q = $('#tabs a[data-v="quests"]'); if (q) q.toggleAttribute('data-dot', quests().some(x => x.ok && !x.claimed)); }
+let awayDone = false;
+function openAway() {
+  if (awayDone || !S.last || Date.now() - S.last.t < 30 * 60e3 || !M || !E) return; awayDone = true;
+  const away = Date.now() - S.last.t, d = netWorth() - S.last.nw, hs = held();
+  const mv = hs.map(t => ({ t, c: shown(t) / (S.last.px[t] || shown(t)) - 1 })).sort((a, b) => Math.abs(b.c) - Math.abs(a.c)).slice(0, 3);
+  const hit = E.events.filter(e => e.t > S.last.t && hs.some(t => (e.cos && e.cos[t] !== undefined) || (e.fx && co[t] && e.fx[co[t].s] !== undefined))).slice(0, 3);
+  const top = E.events.filter(e => e.t > S.last.t).slice(0, 3), nxt = (E.upcoming || []).find(u => u.at > Date.now());
+  const dur = away < 3600e3 ? Math.round(away / 60e3) + ' minutes' : away < 86400e3 ? Math.round(away / 3600e3) + ' hours' : Math.round(away / 86400e3) + ' days';
+  const box = $('#settings'); box.hidden = false; document.body.style.overflow = 'hidden';
+  box.innerHTML = `<div class="set-in"><div class="set-top"><h2>While you were away</h2><button id="closeset">Close</button></div>
+    <div class="gray" style="margin-bottom:var(--b)">${dur}</div>
+    <div class="away-nw"><span class="gray">Net worth</span><b class="${cls(d)}">${arrow(d)} ${money(Math.abs(d))}</b></div>
+    ${statusBanner()}
+    ${mv.length ? `<h3>Your holdings</h3>${mv.map(r => `<a class="aw-row" href="#co/${r.t}" data-close><b>${r.t}</b><span class="gray">${esc((co[r.t] || {}).n || '')}</span><b class="${cls(r.c)}">${pct(r.c)}</b></a>`).join('')}` : ''}
+    ${(hit.length ? hit : top).length ? `<h3>${hit.length ? 'News that hit you' : 'In the news'}</h3>${(hit.length ? hit : top).map(e => `<div class="aw-ev"><div class="b">${esc(e.head)}</div><div class="chips">${chips(e)}</div></div>`).join('')}` : ''}
+    ${nxt ? `<h3>Next up</h3><div class="aw-row"><b>${esc(nxt.label)}</b><span class="gray"></span><b data-cd="${nxt.at}">${countdown(nxt.at - Date.now())}</b></div>` : ''}
+    <div class="row-btns" style="margin-top:var(--c)"><button class="go" id="closeset">Back to the game</button></div></div>`;
+}
 function awayHTML() {
   if (!S.last || !held().length) return '';
   const away = Date.now() - S.last.t; if (away < 10 * 60e3) return '';
@@ -310,7 +350,7 @@ function upcomingHTML() {
 }
 function vFeed() {
   if (!E) return '<div class="empty">Loading...</div>';
-  main.innerHTML = `<h2>Feed</h2>${inJail() || S.cash < 0 || broke() ? statusBanner() : ''}${awayHTML()}${upcomingHTML()}<h3>Latest</h3>${E.events.slice(0, 40).map(evHTML).join('')}`;
+  main.innerHTML = `<h2>Feed</h2>${inJail() || S.cash < 0 || broke() ? statusBanner() : ''}${nowHTML()}${upcomingHTML()}<h3>Latest</h3>${E.events.slice(0, 40).map(evHTML).join('')}`;
 }
 /* ---------- sorting and watchlists ---------- */
 const dchg = t => shown(t) - (base24[t] || shown(t));
@@ -395,7 +435,7 @@ async function vCompany() {
     <div class="quick"><button data-pc="25">25%</button><button data-pc="50">50%</button><button data-pc="100">All</button></div>
     <div class="btns" style="grid-template-columns:1fr"><button class="go" id="confirm" data-side="buy">Buy ${t}</button></div>
     <div class="msg" id="tmsg"></div></div>
-  <div class="trade" style="margin-top:var(--b)" id="optbox">${optPanel(t)}</div></div></div>`;
+  <div class="trade" style="margin-top:var(--b)" id="optbox">${optPanel(t)}</div>${manipPanel(t)}</div></div>`;
   drawChart(t);
 }
 let opt = { call: true, exp: 1, k: 2, qty: 1 };           // exp in hours
@@ -425,6 +465,17 @@ function buyOption(t) {
   if (q.cost > Math.max(0, netWorth()) * 3) return 'The broker says that is too much, even for you.';
   S.cash -= q.cost; S.opts = (S.opts || []).concat([{ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), tk: t, call: opt.call, K: q.K, qty, paid: q.cost, exp: Date.now() + opt.exp * 3600e3 }]);
   save(); submitBoard(); return '';
+}
+const reachOf = lv => lv >= 10 ? 250 : [0, 0, 0, 0, 0, 0, 10, 25, 50, 100][lv] || 0;
+function manipPanel(t) {
+  if (!S.manip || idxs[t]) return '';
+  const lv = level(), reach = reachOf(lv), px = shown(t), left = (S.manipNext || 0) - Date.now(), inReach = px <= reach;
+  const why = !S.acct ? 'Needs an account' : left > 0 ? null : !inReach ? 'Out of reach' : '';
+  return `<div class="trade" style="margin-top:var(--b)" id="manipbox"><div class="b" style="margin-bottom:var(--a)">Influence</div>
+    <div class="row2"><span>Your reach</span><b>Under ${money(reach, 0)}</b></div>
+    <div class="row2"><span>Push</span><b>${Math.min(8, 2 + (lv - 5))}%</b></div>
+    <div class="btns"><button class="go" data-manip="1" ${why === '' ? '' : 'disabled'}>Pump</button><button class="stop" data-manip="-1" ${why === '' ? '' : 'disabled'}>Dump</button></div>
+    <div class="msg" id="mmsg">${left > 0 ? `Ready in <b data-cd="${S.manipNext}">${countdown(left)}</b>` : why ? esc(why) : ''}</div></div>`;
 }
 async function drawChart(t) {
   const box = $('#chartbox'); if (!box) return;
@@ -467,7 +518,7 @@ function vPortfolio() {
   const tot = posValue() || 1;
   const bag = hs.some(t => S.pos[t].sh * shown(t) <= S.pos[t].cost * 0.7);
   const shown_b = Object.keys(S.badges).map(k => `<span class="badge ${BADGES[k][1]}">${BADGES[k][0]}</span>`).join('') + (bag ? '<span class="badge shame">Bagholder</span>' : '');
-  main.innerHTML = `<div class="rowflex ph"><h2>Portfolio</h2><div class="ladbox ${l[1]}" id="pfladder">${l[0]}</div></div><div class="pname">${esc(S.name)}</div>${statusBanner()}
+  main.innerHTML = `<div class="rowflex ph"><h2>Portfolio</h2><div class="ladbox ${l[1]}" id="pfladder">${l[0]}</div></div><div class="rowflex pname"><span>${esc(S.name)}</span><button id="sharebtn">Share portfolio</button></div>${statusBanner()}
   <div class="big"><div><div class="l">Net worth</div><div class="v" id="pfnw">${money(nw)}</div></div><div><div class="l">Return</div><div class="v ${cls(r)}" id="pfret">${pct(r)}</div></div>
     <div><div class="l">Cash</div><div class="v">${money(S.cash)}</div></div><div><div class="l">Invested</div><div class="v" id="pfinv">${money(posValue())}</div></div></div>
   ${hs.length ? `<table><thead><tr><th>Holding</th><th>Shares</th><th>Value</th><th>Gain</th></tr></thead><tbody>${hs.sort((a, b) => S.pos[b].sh * shown(b) - S.pos[a].sh * shown(a)).map(t => {
@@ -481,8 +532,8 @@ function vPortfolio() {
 const BADGE_INFO = { jail: 'Go to jail over options debt.', rekt: 'Fall 25% below your starting money.', bigbig: 'Reach 15% above your starting money.', diamond: 'Hold a stock through an 8% drop from one headline.',
   brrr3: 'Claim 3 Brrr handouts.', basket: 'Hold stocks in 8 sectors at once.', martha: 'Get caught by the SEC.', tipster: 'Buy an insider tip.' };
 function vQuests() {
-  const qs = quests(), lv = level(), cur = S.tendies, lo = lv * lv * 20, hi = (lv + 1) * (lv + 1) * 20, pc = Math.min(100, (cur - lo) / (hi - lo) * 100);
-  main.innerHTML = `<div class="rowflex ph"><h2>Quests</h2><div class="tnbox"><b id="metn">${cur.toLocaleString('en-US')}</b> tendies</div></div>
+  const qs = quests(), lv = level(), cur = S.earned || S.tendies, lo = lv * lv * 20, hi = (lv + 1) * (lv + 1) * 20, pc = Math.min(100, (cur - lo) / (hi - lo) * 100);
+  main.innerHTML = `<div class="rowflex ph"><h2>Quests</h2><div class="tnbox"><b id="metn">${S.tendies.toLocaleString('en-US')}</b> tendies</div></div>
   <div class="card lvlcard"><div class="gray">Level ${lv}</div><div class="lvlt">${esc(title())}</div>
     <div class="meter big"><i style="width:${pc}%"></i></div><b>${cur} of ${hi}</b></div>
   <h3>Today</h3><div class="cards">${qs.map(q => questCard(q.t, q.d, q.r, q.pr, q.p, q.claimed, q.ok, 'data-claim="' + q.id + '"')).join('')}</div>
@@ -490,16 +541,19 @@ function vQuests() {
   <h3>Shop</h3><div class="cards">
     ${shopCard('Lawyer', 'Wipes the next SEC fine.', LAWYER, 'lawyer', (S.lawyers || 0) ? `${S.lawyers} on retainer` : '')}
     ${shopCard('Bail', 'Walk out of jail right now.', BAIL, 'bail', inJail() ? '' : 'Not in jail', !inJail())}
+    ${shopCard('Fast orders', 'Orders fill the moment you place them.', FAST, 'fast', '', false, S.fast ? 'owned' : '')}
+    ${shopCard('Manipulation', 'Move small stocks yourself. Reach grows with level.', MANIP, 'manip', S.manip ? '' : 'Level ' + MANIP_LEVEL, false, S.manip ? 'owned' : lv < MANIP_LEVEL ? 'locked' : '')}
   </div>`;
 }
 function questCard(t, d, r, pr, prog, claimed, ok, attr) {
   return `<div class="card"><div class="card-h"><span class="qt">${esc(t)}</span><span class="reward">+${r}</span></div><div class="qd">${esc(d)}</div><div class="meter"><i style="width:${Math.round(pr * 100)}%"></i></div>
     <div class="card-f"><b>${esc(prog)}</b>${claimed ? '<span class="gray">Claimed</span>' : `<button class="${ok ? 'go' : ''}" ${attr} ${ok ? '' : 'disabled'}>Claim</button>`}</div></div>`;
 }
-function shopCard(t, d, cost, key, note, off) {
-  const can = S.tendies >= cost && !off;
+function shopCard(t, d, cost, key, note, off, state) {
+  const can = S.tendies >= cost && !off && !state;
+  const label = state === 'owned' ? 'Owned' : state === 'locked' ? 'Locked' : off ? 'Unavailable' : can ? cost + ' tendies' : 'Needs ' + cost;
   return `<div class="card"><div class="card-h"><span class="qt">${t}</span><b>${cost}</b></div><div class="qd">${d}</div>
-    <div class="card-f"><span class="gray">${esc(note || '')}</span><button data-buy="${key}" ${can ? '' : 'disabled'}>${off ? 'Unavailable' : can ? cost + ' tendies' : 'Needs ' + cost}</button></div></div>`;
+    <div class="card-f"><span class="gray">${esc(note || '')}</span><button data-buy="${key}" ${can ? '' : 'disabled'}>${label}</button></div></div>`;
 }
 function vNoSource() {
   const ev = E && E.events.find(x => x.id === arg);
@@ -522,22 +576,166 @@ function vNoSource() {
   <div class="lead">Headlines marked <b>Real news</b> open the story they came from. This one has nothing behind it, and prices moved anyway.</div>
   <div class="row-btns" style="margin-top:var(--c)"><a class="btnlink" href="#feed">Back to the feed</a></div>`;
 }
+/* ---------- When Lambo: the weekly race, the all-time board, friends ---------- */
+let boardTab = 'week', BD = null, friendMsg = '';
+const gainTxt = g => `<span class="${cls(g)}">${g >= 0 ? '+' : '-'}${Math.abs(g * 100).toFixed(1)}%</span>`;
+const moveHTML = d => d ? `<span class="mv ${d > 0 ? 'up' : 'down'}">${d > 0 ? '▲' : '▼'}${Math.abs(d)}</span>` : '<span class="mv">-</span>';
+function composeBoard(tab) {
+  const me = S.acct ? S.acct.u : '', seen = new Map(), real = new Set();
+  const put = (u, nw, wg, bot) => { const k = u.toLowerCase(); if (!seen.has(k)) seen.set(k, { u, nw, wg, bot }); else { const r = seen.get(k); if (nw !== undefined) r.nw = nw; if (wg !== undefined) r.wg = wg; } };
+  BD.real.forEach(r => { real.add(r[0]); put(r[0], r[1], undefined, false); });
+  BD.week.forEach(r => { real.add(r[0]); put(r[0], r[2], r[1], false); });
+  BD.peek.forEach(r => { real.add(r[0]); put(r[0], r[1], r[3], false); });
+  BD.bots.forEach(r => { if (!real.has(r[0])) put(r[0], r[1], r[3], true); });
+  if (me) { const mine = BD.peek.find(r => r[0] === me); seen.set(me.toLowerCase(), { u: me, nw: netWorth(), wg: mine ? mine[3] : (seen.get(me.toLowerCase()) || {}).wg || 0, bot: false }); }
+  let list = [...seen.values()].filter(r => r.nw !== undefined);
+  if (tab === 'week') list = list.filter(r => r.wg !== undefined).sort((a, b) => b.wg - a.wg);
+  else if (tab === 'friends') { const f = new Set((S.friends || []).map(x => x.toLowerCase()).concat(me ? [me.toLowerCase()] : [])); list = list.filter(r => f.has(r.u.toLowerCase())).sort((a, b) => b.nw - a.nw); }
+  else list = list.sort((a, b) => b.nw - a.nw);
+  return list;
+}
+function rankDeltas(tab, list) {
+  S.rk = S.rk || {}; const snap = S.rk[tab], now = Date.now(), out = {};
+  if (snap && now - snap.t > 3 * 60e3) list.forEach((r, i) => { const p = snap.r[r.u]; out[r.u] = p === undefined ? 0 : p - (i + 1); });
+  if (!snap || now - snap.t > 30 * 60e3) { const r = {}; list.slice(0, 150).forEach((x, i) => { r[x.u] = i + 1; }); S.rk[tab] = { t: now, r }; try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { } }
+  return out;
+}
+function figures(r, tab) { return tab === 'week' ? [`<b class="big">${gainTxt(r.wg)}</b>`, `<span class="sm">${money(r.nw, 0)}</span>`] : [`<b class="big">${money(r.nw, 0)}</b>`, `<span class="sm">${gainTxt(r.nw / START - 1)} total</span>`]; }
+function bRow(r, rank, tab, d) {
+  const me = S.acct && r.u.toLowerCase() === S.acct.u.toLowerCase(), f = figures(r, tab);
+  return `<div class="br${me ? ' me' : ''}"><div class="bk"><b>${rank}</b>${moveHTML(d)}</div><div class="bu">${esc(r.u)}</div><div class="bv">${f[0]}${f[1]}</div>${tab === 'friends' && !me ? `<button class="x" data-unfriend="${esc(r.u)}" aria-label="Remove friend">✕</button>` : ''}</div>`;
+}
+function paintBoard() {
+  if (!BD || route !== 'board') return;
+  const tab = boardTab, list = composeBoard(tab), d = rankDeltas(tab, list), me = S.acct ? list.findIndex(r => r.u.toLowerCase() === S.acct.u.toLowerCase()) : -1;
+  const shownN = 50, top = list.slice(0, shownN), pod = tab === 'friends' ? [] : top.slice(0, 3), rest = tab === 'friends' ? top : top.slice(3);
+  const tabs = [['week', 'This week'], ['all', 'All time'], ['friends', 'Friends']].map(([k, t]) => `<button data-bt="${k}" class="${tab === k ? 'on' : ''}">${t}</button>`).join('');
+  main.innerHTML = `<div class="rowflex ph"><h2>When Lambo</h2><div class="tnbox">Week ends in <b data-cd="${BD.wkEnd}">${countdown(BD.wkEnd - Date.now())}</b></div></div>
+  ${S.acct ? '' : '<div class="note rowflex"><span>The board is for people with an account.</span><button id="openset">Make one</button></div>'}
+  <div class="sortbar">${tabs}</div>
+  ${tab === 'friends' ? `<form class="tools" id="friendform"><input id="friendin" maxlength="16" placeholder="Add a friend by username" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="go">Add</button></form><div class="gray" style="margin-bottom:var(--b)">${esc(friendMsg)}</div>` : ''}
+  ${pod.length ? `<div class="pods">${pod.map((r, i) => { const f = figures(r, tab), mine = S.acct && r.u.toLowerCase() === S.acct.u.toLowerCase(); return `<div class="pod p${i + 1}${mine ? ' me' : ''}"><b class="pn">${i + 1}</b>${moveHTML(d[r.u])}<div class="bu">${esc(r.u)}</div><div class="bv">${f[0]}${f[1]}</div></div>`; }).join('')}</div>` : ''}
+  <div class="brs">${rest.map((r, i) => bRow(r, (tab === 'friends' ? 0 : 3) + i + 1, tab, d[r.u])).join('')}
+  ${me >= shownN ? `<div class="gap">&middot;&middot;&middot;</div>${bRow(list[me], me + 1, tab, d[list[me].u])}` : ''}</div>
+  ${!list.length ? `<div class="empty">${tab === 'friends' ? 'No friends yet.' : 'Nobody yet.'}</div>` : ''}`;
+}
 async function vBoard() {
-  main.innerHTML = '<h2>Wen Lambo</h2><div class="empty">Loading...</div>';
+  main.innerHTML = '<div class="rowflex ph"><h2>When Lambo</h2></div><div class="empty">Loading...</div>';
   if (S.acct) await syncNow();
-  const list = await loadBoard();
+  const names = [...new Set((S.friends || []).concat(S.acct ? [S.acct.u] : []))];
+  const [rb, bots, pk] = await Promise.all([api({ op: 'board' }), getJSON(LIVE, 'bots.json'), names.length ? api({ op: 'peek', names }) : Promise.resolve(null)]);
   if (route !== 'board') return;
-  if (!list) { main.innerHTML = '<h2>Wen Lambo</h2><div class="empty">Could not reach the leaderboard. Try again in a minute.</div>'; return; }
-  const mine = S.acct ? list.findIndex(x => x.u === S.acct.u) : -1;
-  main.innerHTML = `<h2>Wen Lambo</h2>${S.acct ? `<div class="gray" style="margin-bottom:var(--b)">${mine >= 0 ? `You are number ${mine + 1}.` : 'You are not in the top 50 yet.'}</div>` : `<div class="note rowflex"><span>The board is for people with an account.</span><button id="openset">Make one</button></div>`}
-  ${list.length ? `<table class="bd"><thead><tr><th>#</th><th>Player</th><th>Net worth</th><th>Status</th></tr></thead><tbody>${list.map((x, i) => `<tr class="${S.acct && x.u === S.acct.u ? 'me' : ''}"><td>${i + 1}</td><td class="nmcell">${esc(x.u)}</td><td>${money(x.nw)}</td><td>${esc(ladder(x.nw / START - 1)[0])}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nobody yet. Be first.</div>'}`;
+  if (!rb || !rb.ok) { main.innerHTML = '<div class="rowflex ph"><h2>When Lambo</h2></div><div class="empty">Could not reach the leaderboard. Try again in a minute.</div>'; return; }
+  BD = { real: rb.board || [], week: rb.week || [], wkEnd: rb.wkEnd || Date.now() + 864e5, bots: (bots && bots.rows) || [], peek: (pk && pk.people) || [] };
+  paintBoard();
+}
+async function addFriend(raw) {
+  const n = String(raw || '').trim().toLowerCase(), say = m => { friendMsg = m; paintBoard(); };
+  if (!/^[a-z0-9_]{3,16}$/.test(n)) return say('Usernames are 3 to 16 letters, numbers or underscores.');
+  if (S.acct && n === S.acct.u.toLowerCase()) return say('That is you.');
+  if ((S.friends || []).includes(n)) return say('Already on the list.');
+  const known = BD.bots.some(r => r[0].toLowerCase() === n) || BD.peek.some(r => r[0] === n);
+  let ok = known;
+  if (!ok) { const r = await api({ op: 'peek', names: [n] }); if (r && r.ok && r.people.length) { BD.peek.push(r.people[0]); ok = true; } }
+  if (!ok) return say('No player with that name.');
+  S.friends = (S.friends || []).concat([n]).slice(0, 30); friendMsg = ''; save(); paintBoard();
 }
 function render() {
   if (route === 'feed') vFeed(); else if (route === 'market') vMarket(); else if (route === 'co') vCompany(); else if (route === 'portfolio') vPortfolio(); else if (route === 'quests') vQuests(); else if (route === 'board') vBoard(); else if (route === 'nosource') vNoSource(); else { location.hash = '#feed'; }
-  renderMe(); renderTape();
+  renderMe(); renderTape(); updateDots();
 }
 function renderMe() {
   $('#me').innerHTML = `<div class="nw" id="menw">${M ? money(netWorth()) : ''}</div>`;
+}
+async function shareText() {
+  const hs = held(); await Promise.all(hs.map(ensureHist));
+  let now = 0, d1 = 0, d7 = 0;
+  const rows = hs.map(t => { const sh = S.pos[t].sh, p = shown(t), w = series(t, '1W'), p7 = (w && w[0] && w[0][1]) || p; now += sh * p; d1 += sh * (base24[t] || p); d7 += sh * p7; return { t, n: (co[t] || {}).n || '', v: sh * p, g: sh * p / S.pos[t].cost - 1 }; }).sort((a, b) => b.v - a.v);
+  const day = now - d1, wk = now - d7, tot = netWorth() - S.dep, nw = netWorth(), sg = x => (x >= 0 ? '+' : '-') + money(Math.abs(x));
+  const line = (label, amt, base) => `${label.padEnd(10)} ${sg(amt)} (${pct(base > 0 ? amt / base : 0)})`;
+  return [`${S.name} on Stonks`, `${ladder(ret())[0]}`, '', `Net worth  ${money(nw)}`, `Cash       ${money(S.cash)}`, '',
+    line('Today', day, nw - day), line('This week', wk, nw - wk), line('All time', tot, S.dep), '',
+    rows.length ? 'Holdings' : 'No holdings', ...rows.map(r => `${r.t.padEnd(5)} ${r.n.slice(0, 22).padEnd(22)} ${money(r.v)}  ${pct(r.g)}`), '', 'https://brrr.web.app'].join('\n');
+}
+async function openShare() {
+  const box = $('#settings'); box.hidden = false; document.body.style.overflow = 'hidden'; box.innerHTML = '<div class="set-in"><div class="empty">Loading...</div></div>';
+  const t = await shareText();
+  box.innerHTML = `<div class="set-in"><div class="set-top"><h2>Share portfolio</h2><button id="closeset">Close</button></div><pre class="sharebox" id="sharetxt">${esc(t)}</pre>
+    <div class="row-btns"><button class="go" id="copyshare">Copy</button>${navigator.share ? '<button id="nativeshare">Share</button>' : ''}</div></div>`;
+}
+/* ---------- the inbox: claims, scams and family ---------- */
+const COMPANY = 'Brokadel';
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const CLAIMANTS = ['Dale Moorecroft', 'Gladys Pennywhistle', 'Buck Sterling', 'Priya Lindqvist', 'Walt Oberdorf', 'Fiona Blackwell', 'Gus Applewhite', 'Tamsin Quill', 'Rex Hargrove', 'Mildred Okafor'];
+const LOSSES = ['barn fire', 'basement flood', 'stolen bicycle', 'cracked windshield', 'lost luggage', 'kitchen fire', 'hail damage', 'burst pipe', 'missing jewelry'];
+const FLAGS = ['Filed two days after the policy began', 'No photos attached', 'Fourth claim this year', 'Loss reported at 3 a.m.', 'Receipts are handwritten', 'Claimant changed the story twice', 'Item was bought the day before'];
+const SCAMS = [['IT Desk <helpdesk@brokade1-it.com>', 'Your password expires today', 'Verify it now at brokade1-secure-login.biz or lose access.', true],
+  ['Payroll <payroll@brokadel-hr.net>', 'Confirm your bank details', 'A payment is on hold. Reply with your account number to release it.', true],
+  ['Delivery <noreply@parcel-hold.co>', 'A package is waiting', 'Pay a $2 fee at the link to release it. Offer ends in one hour.', true],
+  ['Gift Rewards <win@prizes-today.xyz>', 'You have been selected', 'Claim your $500 gift card. Click now.', true],
+  [`Benefits <benefits@${COMPANY.toLowerCase()}.com>`, 'Open enrollment closes Friday', 'Choose your plan in the employee portal before Friday. No action needed if you are keeping your current plan.', false],
+  [`Facilities <facilities@${COMPANY.toLowerCase()}.com>`, 'Parking lot repainting', 'Lot B is closed Tuesday. Use Lot C.', false]];
+const FAMILY = [['Mom', 'Can you help with rent this month?', 'Things are tight and the car needed a repair.'], ['Dad', 'Roof deposit', 'The roofer wants a deposit before he starts.'],
+  ['Sister', 'Short on books money', 'I will pay you back after my first paycheck.'], ['Grandma', 'Prescription went up', 'I hate to ask. It is only this once.']];
+function mkMail() {
+  const r = Math.random(), nw = Math.max(2000, netWorth()), id = Date.now().toString(36) + Math.random().toString(36).slice(2, 5), base = { id, t: Date.now(), st: 'new', res: '' };
+  if (r < 0.4) {
+    const k = Math.floor(Math.random() * 4), flags = []; while (flags.length < k) { const f = pick(FLAGS); if (!flags.includes(f)) flags.push(f); }
+    const amt = Math.round(Math.max(30, nw * (0.004 + Math.random() * 0.03)) / 5) * 5, fraud = k >= 2 ? Math.random() < 0.8 : Math.random() < 0.12;
+    return Object.assign(base, { type: 'claim', from: `Claims <claims@${COMPANY.toLowerCase()}.com>`, subj: `Claim ${1000 + Math.floor(Math.random() * 9000)}: ${pick(LOSSES)}`, amt, fraud,
+      body: `Claimant: ${pick(CLAIMANTS)}\nAmount: ${money(amt, 0)}\n\n${flags.length ? flags.map(f => '- ' + f).join('\n') : 'Nothing unusual in the file.'}`, opts: [{ k: 'approve', label: 'Approve' }, { k: 'deny', label: 'Deny' }] });
+  }
+  if (r < 0.65) { const m = pick(SCAMS); return Object.assign(base, { type: 'scam', from: m[0], subj: m[1], body: m[2], scam: m[3], opts: [{ k: 'click', label: 'Open the link' }, { k: 'report', label: 'Report as spam' }, { k: 'del', label: 'Delete' }] }); }
+  if (r < 0.88) {
+    const f = pick(FAMILY), amt = Math.round(Math.max(40, nw * (0.005 + Math.random() * 0.02)) / 10) * 10;
+    return Object.assign(base, { type: 'family', from: f[0], subj: f[1], amt, body: `${f[2]}\n\nCould you send ${money(amt, 0)}?`, opts: [{ k: 'send', label: 'Send ' + money(amt, 0) }, { k: 'no', label: 'Not now' }] });
+  }
+  const amt = Math.round(Math.max(100, nw * 0.03) / 50) * 50;
+  return Object.assign(base, { type: 'family', cousin: true, from: 'Cousin Dave', subj: 'Can not miss, lend me money', amt, body: `Bro. I found a coin that is going to ten times. Lend me ${money(amt, 0)} and I will double it by Friday. Do not tell anyone.`, opts: [{ k: 'send', label: 'Send ' + money(amt, 0) }, { k: 'no', label: 'Not now' }] });
+}
+function mailAct(id, k) {
+  const m = (S.mail || []).find(x => x.id === id); if (!m || m.st === 'done') return;
+  let res = '';
+  if (m.type === 'claim') {
+    if (k === 'approve') { if (m.fraud) { const c = Math.min(S.cash, m.amt * 0.5); S.cash -= c; res = `It was fraud. Your share of the payout: ${money(c)}.`; } else { earn(6); res = 'Paid. A customer is happy. +6 tendies.'; } }
+    else { if (m.fraud) { earn(10); res = 'Fraud caught. +10 tendies.'; } else if (Math.random() < 0.5) { const c = Math.min(S.cash, m.amt * 0.4); S.cash -= c; res = `It was legitimate. A bad faith complaint costs ${money(c)}.`; } else res = 'It was legitimate. They did not complain.'; }
+  } else if (m.type === 'scam') {
+    if (k === 'click') { if (m.scam) { const c = Math.min(S.cash, 80 + Math.random() * 320); S.cash -= c; res = `It was a scam. ${money(c)} gone.`; } else res = 'Fine. It was a real notice.'; }
+    else if (k === 'report') { if (m.scam) { earn(5); res = 'Scam reported. +5 tendies.'; } else res = 'False alarm. It was a real notice.'; }
+    else res = m.scam ? 'Deleted. A scam.' : 'Deleted. It was a real notice.';
+  } else if (m.type === 'family') {
+    if (k === 'send') { const c = Math.min(S.cash, m.amt); S.cash -= c; res = m.cousin ? (Math.random() < 0.7 ? `Sent ${money(c)}. Dave has stopped replying.` : `Sent ${money(c)}. Dave actually paid it back, somehow.`) : `Sent ${money(c)}. They are grateful.`; if (m.cousin && res.includes('paid it back')) S.cash += c; else if (!m.cousin) earn(3); }
+    else res = m.cousin ? 'Wise.' : 'Left on read.';
+  }
+  m.st = 'done'; m.res = res; save(); award(); renderMe(); mailBadge(); openMail(id);
+}
+let mailOpen = '';
+function openMail(id) {
+  mailOpen = id || ''; const box = $('#settings'); box.hidden = false; document.body.style.overflow = 'hidden';
+  S.mail = S.mail || []; const m = S.mail.find(x => x.id === id);
+  if (m && m.st === 'new') { m.st = 'read'; save(); mailBadge(); }
+  if (m) {
+    const can = o => o.k !== 'send' || S.cash >= m.amt;
+    box.innerHTML = `<div class="set-in"><div class="set-top"><h2>Inbox</h2><button id="closeset">Close</button></div><div class="crumb"><a href="#" data-mailback>Inbox</a> / ${esc(m.from.replace(/<.*>/, '').trim())}</div>
+      <div class="mailv"><div class="gray">${esc(m.from)}</div><div class="qt" style="font-size:var(--m);white-space:normal">${esc(m.subj)}</div><div class="mailbody">${esc(m.body)}</div></div>
+      ${m.st === 'done' ? `<div class="note"><b>${esc(m.res)}</b></div>` : `<div class="row-btns" style="flex-wrap:wrap">${m.opts.map(o => `<button data-mail-act="${m.id}:${o.k}" ${can(o) ? '' : 'disabled'}>${can(o) ? o.label : 'Needs ' + money(m.amt, 0)}</button>`).join('')}</div>`}</div>`;
+    return;
+  }
+  box.innerHTML = `<div class="set-in"><div class="set-top"><h2>Inbox</h2><button id="closeset">Close</button></div>${S.mail.length ? S.mail.map(x => `<button class="mailrow ${x.st === 'new' ? 'new' : ''}" data-mail-open="${x.id}"><span class="mfrom">${esc(x.from.replace(/<.*>/, '').trim())}</span><span class="msubj">${esc(x.subj)}</span><span class="gray">${x.st === 'done' ? 'Done' : ago(x.t)}</span></button>`).join('') : '<div class="empty">Nothing yet.</div>'}</div>`;
+}
+function mailBadge() { const n = (S.mail || []).filter(x => x.st === 'new').length, b = $('#mailbadge'); if (b) { b.hidden = !n; b.title = n + ' new'; } const bt = $('#openmail'); if (bt) bt.title = n ? 'Inbox, ' + n + ' new' : 'Inbox'; }
+function mailTick() {
+  if (!M) return; S.mail = S.mail || []; const now = Date.now();
+  if (!S.mailNext) S.mailNext = now + 12000;
+  if (now < S.mailNext) return;
+  if (now - S.mailNext > 120000) S.mailNext = now;                              // away for a while: one new mail, not a pile
+  if (S.mail.filter(x => x.st === 'new').length < 8) {
+    S.mail.unshift(mkMail()); if (S.mail.length > 25) { const i = S.mail.map(x => x.st).lastIndexOf('done'); S.mail.splice(i >= 0 ? i : S.mail.length - 1, 1); }
+    const bt = $('#openmail'); if (bt) { bt.classList.remove('ping'); void bt.offsetWidth; bt.classList.add('ping'); }
+    if (!$('#settings').hidden && !mailOpen && $('#settings').textContent.includes('Inbox')) openMail('');
+    try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { }
+  }
+  S.mailNext = now + 25000 + Math.random() * 15000; mailBadge();
 }
 function applyTheme() {
   const t = S.theme || 'dark', dark = t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -565,7 +763,7 @@ function settingsHTML() {
   <h3>Fine print</h3><div class="gray">Every company here is made up. The news is real, the market is not. Prices move on headlines from the last hour or so. You cannot lose real money. Options can expire worthless and put you in debt, and debt ends in jail.</div></div>`;
 }
 function openSettings() { const d = $('#settings'); d.innerHTML = settingsHTML(); d.hidden = false; document.body.style.overflow = 'hidden'; }
-function closeSettings() { const d = $('#settings'); d.hidden = true; d.innerHTML = ''; document.body.style.overflow = ''; }
+function closeSettings() { mailOpen = ''; const d = $('#settings'); d.hidden = true; d.innerHTML = ''; document.body.style.overflow = ''; }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSettings(); });
 function renderTape() {
   if (!W || !M) return;
@@ -577,6 +775,8 @@ function renderTape() {
 /* ---------- events ---------- */
 document.addEventListener('click', e => {
   const t = e.target;
+  if (t.closest && t.closest('[data-mailback]')) { e.preventDefault(); openMail(''); return; }
+  if (t.closest && t.closest('[data-close]')) closeSettings();
   const go = t.closest('[data-go]'); if (go && !t.closest('a') && !t.closest('button')) { location.hash = '#' + go.dataset.go; return; }
   const ev = t.closest('.ev');
   const b = t.closest('button');
@@ -595,6 +795,7 @@ document.addEventListener('click', e => {
       if (pending) return;
       const amtEl = $('#amt'), v = parseFloat((amtEl.value || '').replace(/[$,]/g, '')), side = b.dataset.side, all = side === 'sell' && amtEl.dataset.all === '1', t0 = arg, msg = $('#tmsg');
       if (!(v > 0)) { msg.textContent = 'Enter an amount.'; msg.className = 'msg down'; return; }
+      if (S.fast) { const m = trade(t0, side, v, all); renderMe(); vCompany(); const e = $('#tmsg'); if (e) { e.textContent = m || (side === 'buy' ? 'Bought.' : 'Sold.'); e.className = 'msg ' + (m ? 'down' : 'up'); } return; }
       holdOrder(msg, '#confirm,.mode,[data-pc]');
       setTimeout(() => {
         const m = trade(t0, side, v, all); pending = false; renderMe();
@@ -605,7 +806,9 @@ document.addEventListener('click', e => {
     if (b.dataset.oc !== undefined || b.dataset.oe || b.dataset.ok !== undefined || b.id === 'obuy') {
       if (b.dataset.oc !== undefined) opt.call = b.dataset.oc === '1'; if (b.dataset.oe) opt.exp = Number(b.dataset.oe); if (b.dataset.ok !== undefined) opt.k = Number(b.dataset.ok);
       if (b.id === 'obuy') {
-        if (pending) return; const t0 = arg; holdOrder($('#omsg'), '#obuy,#optbox button');
+        if (pending) return; const t0 = arg;
+        if (S.fast) { const m = buyOption(t0); renderMe(); $('#optbox').innerHTML = optPanel(t0); const e = $('#omsg'); e.textContent = m || 'Bought. It will settle at expiry.'; e.className = 'msg ' + (m ? 'down' : 'up'); refreshTrade(); return; }
+        holdOrder($('#omsg'), '#obuy,#optbox button');
         setTimeout(() => { const m = buyOption(t0); pending = false; renderMe(); if (route === 'co' && arg === t0) { $('#optbox').innerHTML = optPanel(t0); const e = $('#omsg'); e.textContent = m || 'Bought. It will settle at expiry.'; e.className = 'msg ' + (m ? 'down' : 'up'); refreshTrade(); } }, ORDER_MS);
         return;
       }
@@ -622,7 +825,7 @@ document.addEventListener('click', e => {
       const raw = mode === 'sell' ? (p ? p.sh * shown(arg) * f : 0) : S.cash * f, am = $('#amt');
       am.value = (Math.floor(raw * 100) / 100).toFixed(2); am.dataset.all = b.dataset.pc === '100' ? '1' : ''; return;
     }
-    if (b.dataset.claim) { const d = today(), q = quests().find(x => x.id === b.dataset.claim); if (q && q.ok && !q.claimed) { S.claimed[d + ':' + q.id] = true; S.tendies += q.r; save(); render(); } return; }
+    if (b.dataset.claim) { const d = today(), q = quests().find(x => x.id === b.dataset.claim); if (q && q.ok && !q.claimed) { S.claimed[d + ':' + q.id] = true; earn(q.r); save(); render(); } return; }
     if (b.id === 'alerts') { S.notify = !S.notify; if (S.notify && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission(); save(); if (!$('#settings').hidden) openSettings(); else render(); return; }
     if (b.dataset.sort) { const cur = sortOf(arg.startsWith('list:')); S.sorts = S.sorts || {}; S.sorts[arg.startsWith('list:') ? 'list' : 'main'] = cur.k === b.dataset.sort && b.dataset.sort !== 'custom' ? { k: cur.k, d: -cur.d } : { k: b.dataset.sort, d: b.dataset.sort === 'name' || b.dataset.sort === 'custom' ? 1 : -1 }; save(); render(); return; }
     if (b.dataset.star) { toggleStar(b.dataset.star); render(); return; }
@@ -632,14 +835,34 @@ document.addEventListener('click', e => {
     if (b.dataset.wlnew) { const n = `List ${wls().length + 1}`, l = newList(n); if (l) { l.tks.push(b.dataset.wlnew); save(); vCompany(); } return; }
     if (b.dataset.wlren) { const l = wls().find(x => x.id === b.dataset.wlren); if (l) { b.outerHTML = `<form id="renform" data-id="${l.id}" class="nm-edit" style="margin:0"><input id="renin" maxlength="24" value="${esc(l.name)}" autocomplete="off"><button class="go">Save</button></form>`; $('#renin').focus(); } return; }
     if (b.dataset.wldel) { if (b.dataset.sure) { S.lists = wls().filter(x => x.id !== b.dataset.wldel); save(); location.hash = '#market'; } else { b.dataset.sure = '1'; b.textContent = 'Really? Click again'; } return; }
+    if (b.dataset.manip) {
+      if (!S.acct || !S.manip) return; const dir = Number(b.dataset.manip), t0 = arg, msg = $('#mmsg'); msg.textContent = 'Sending...';
+      api({ op: 'manip', u: S.acct.u, t: S.acct.t, tk: t0, dir, lv: level() }).then(r => {
+        if (r.ok) { S.manipNext = r.next; let m = 'Rumor sent. It lands within minutes.'; if (Math.random() < 0.35) { if ((S.lawyers || 0) > 0) { S.lawyers--; m += ' The SEC noticed, your lawyer fixed it.'; } else { const f = Math.min(S.cash, netWorth() * 0.08); S.cash -= f; S.fines += f; give('martha'); m += ` The SEC noticed. Fine: ${money(f)}.`; } } save(); renderMe(); if (route === 'co' && arg === t0) { vCompany(); const e = $('#mmsg'); if (e) e.textContent = m; } }
+        else { msg.textContent = r.error === 'cooldown' ? 'Not ready yet.' : 'Could not send. Try again.'; if (r.next) { S.manipNext = r.next; save(); } }
+      }); return;
+    }
+    if (b.dataset.bt) { boardTab = b.dataset.bt; friendMsg = ''; paintBoard(); return; }
+    if (b.dataset.unfriend) { S.friends = (S.friends || []).filter(x => x.toLowerCase() !== b.dataset.unfriend.toLowerCase()); save(); paintBoard(); return; }
     if (b.dataset.acc) { accountAction(b.dataset.acc); return; }
     if (b.dataset.accMode) { accMode = b.dataset.accMode; accMsg = ''; openSettings(); return; }
     if (b.id === 'signout') { signOut(); return; }
     if (b.id === 'delacct') { if (b.dataset.sure) deleteAccount(); else { b.dataset.sure = '1'; b.textContent = 'Really? Click again'; } return; }
+    if (b.id === 'sharebtn') { openShare(); return; }
+    if (b.id === 'copyshare') { const tx = $('#sharetxt').textContent; (navigator.clipboard ? navigator.clipboard.writeText(tx) : Promise.reject()).catch(() => { const ta = document.createElement('textarea'); ta.value = tx; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (er) { } ta.remove(); }).finally(() => { b.textContent = 'Copied'; }); return; }
+    if (b.id === 'nativeshare') { try { navigator.share({ text: $('#sharetxt').textContent }); } catch (er) { } return; }
+    if (b.id === 'openmail') { openMail(''); return; }
+    if (b.dataset.mailOpen) { openMail(b.dataset.mailOpen); return; }
+    if (b.dataset.mailAct) { const [id, k] = b.dataset.mailAct.split(':'); mailAct(id, k); return; }
     if (b.id === 'openset') { openSettings(); return; }
     if (b.id === 'closeset') { closeSettings(); return; }
     if (b.dataset.theme) { S.theme = b.dataset.theme; save(); applyTheme(); openSettings(); return; }
-    if (b.dataset.buy) { const k = b.dataset.buy; if (k === 'lawyer' && S.tendies >= LAWYER) { S.tendies -= LAWYER; S.lawyers = (S.lawyers || 0) + 1; save(); render(); renderMe(); } if (k === 'bail' && S.tendies >= BAIL && inJail()) { S.tendies -= BAIL; S.jailUntil = 0; save(); render(); renderMe(); } return; }
+    if (b.dataset.buy) { const k = b.dataset.buy; if (k === 'lawyer' && S.tendies >= LAWYER) { S.tendies -= LAWYER; S.lawyers = (S.lawyers || 0) + 1; save(); render(); renderMe(); } if (k === 'bail' && S.tendies >= BAIL && inJail()) { S.tendies -= BAIL; S.jailUntil = 0; save(); render(); renderMe(); }
+      if (k === 'fast' && !S.fast && S.tendies >= FAST) { S.tendies -= FAST; S.fast = true; save(); render(); renderMe(); }
+      if (k === 'manip' && !S.manip && level() >= MANIP_LEVEL && S.tendies >= MANIP) { S.tendies -= MANIP; S.manip = true; save(); render(); renderMe(); }
+      return; }
+    if (b.dataset.buy === 'fast' && !S.fast && S.tendies >= FAST) { S.tendies -= FAST; S.fast = true; save(); render(); renderMe(); return; }
+    if (b.dataset.buy === 'manip' && !S.manip && level() >= MANIP_LEVEL && S.tendies >= MANIP) { S.tendies -= MANIP; S.manip = true; save(); render(); renderMe(); return; }
     if (b.id === 'bail') { if (S.tendies >= BAIL && inJail()) { S.tendies -= BAIL; S.jailUntil = 0; save(); render(); renderMe(); } return; }
     if (b.id === 'donate') { donate(); render(); renderMe(); return; }
     return;
@@ -664,6 +887,7 @@ document.addEventListener('drop', e => {
   const l = wls().find(x => x.id === arg.slice(5)); if (l && dragT !== r.dataset.dt) { moveTk(l, dragT, r.dataset.dt); save(); render(); } dragT = null;
 });
 document.addEventListener('submit', e => {
+  if (e.target.id === 'friendform') { e.preventDefault(); addFriend($('#friendin').value); return; }
   if (e.target.id === 'newlistform') { e.preventDefault(); const l = newList($('#newlistin').value); if (l) location.hash = '#market/list:' + l.id; return; }
   if (e.target.id === 'wladdform') { e.preventDefault(); const t = $('#wladd').value.trim().toUpperCase(), l = wls().find(x => x.id === arg.slice(5)); if (l && co[t] && !l.tks.includes(t)) { l.tks.push(t); save(); render(); } return; }
   if (e.target.id === 'renform') { e.preventDefault(); const l = wls().find(x => x.id === e.target.dataset.id), n = $('#renin').value.replace(/[<>]/g, '').trim().slice(0, 24); if (l && n) { l.name = n; save(); } render(); return; }
@@ -675,6 +899,7 @@ window.addEventListener('hashchange', setRoute);
 /* ---------- the once-a-second pass: prices, tab title, countdowns ---------- */
 function tick() {
   if (!M) return;
+  mailTick();
   document.querySelectorAll('[data-px]').forEach(el => { el.textContent = num(shown(el.dataset.px)); });
   document.querySelectorAll('[data-chg]').forEach(el => {
     const ch = chg24(el.dataset.chg); el.className = cls(ch);
@@ -702,7 +927,7 @@ async function boot() {
   if (S.pos.TWLN) { S.pos.DOUG = S.pos.TWLN; delete S.pos.TWLN; }
   (S.opts || []).forEach(o => { if (o.tk === 'TWLN') o.tk = 'DOUG'; });
   S.seenEv = S.seenEv || Math.max(0, ...(E ? E.events.map(e => e.t) : [0]));
-  applyTheme(); award(); render(); tick(); submitBoard();
+  applyTheme(); award(); render(); tick(); submitBoard(); openAway(); refreshBoard(); mailBadge();
   setInterval(tick, 1000);
   setInterval(async () => { const before = M && M.t; await loadLive(); if (M && M.t !== before) { if (route === 'feed' || route === 'market') render(); award(); renderTape(); } }, 60000);
   document.addEventListener('visibilitychange', () => { if (document.hidden) snapshot(); else loadLive().then(() => { render(); }); });

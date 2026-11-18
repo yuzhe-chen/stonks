@@ -1,4 +1,4 @@
-// Stonks accounts and the Wen Lambo leaderboard.
+// Stonks accounts and the When Lambo leaderboard.
 // Accounts live in a Google Sheet (one row each), so there is no account limit. The owner approves the Sheets permission once;
 // visitors never see a permission screen. Passwords are salted and hashed, tokens are hashed, nothing readable is stored.
 const P = PropertiesService.getScriptProperties();
@@ -39,17 +39,32 @@ function authed_(u, t) {
   const a = getAcct_(u); if (!a || typeof t !== 'string' || t.length < 10) return null;
   return a.tk.indexOf(sha_(t)) >= 0 ? a : null;
 }
-function setRow_(u, nw, tn) {
+const weekKey_ = t => Math.floor((t / 864e5 + 3) / 7);                   // weeks start Monday 00:00 UTC
+const weekEnd_ = k => ((k * 7 - 3) + 7) * 864e5;
+function lw_() { const v = P.getProperty('lw'); return v ? JSON.parse(v) : []; }
+function setRow_(u, nw, tn, wg) {
   const l = lb_().filter(r => r[0] !== u);
   l.push([u, Math.round(nw * 100) / 100, tn, Date.now()]);
   l.sort((x, y) => y[1] - x[1]);
   P.setProperty('lb', JSON.stringify(l.slice(0, LB_KEEP)));
+  const w = lw_().filter(r => r[0] !== u);
+  w.push([u, Math.round((wg || 0) * 10000) / 10000, Math.round(nw * 100) / 100, Date.now()]);
+  w.sort((x, y) => y[1] - x[1]);
+  P.setProperty('lw', JSON.stringify(w.filter(r => weekKey_(r[3]) === weekKey_(Date.now())).slice(0, LB_KEEP)));
 }
+// the week's gain: a new week starts from the last value known before it
+function weekGain_(a, nw) { const wk = weekKey_(Date.now()); if (a.wk !== wk) { a.wk = wk; a.w0 = a.nw || START_; } return a.w0 > 0 ? nw / a.w0 - 1 : 0; }
 function newToken_(a) { const t = rand_(32); a.tk = [sha_(t)].concat(a.tk || []).slice(0, 4); return t; }
 
 function handle_(o) {
   const op = String(o.op || '');
-  if (op === 'board') return { ok: true, board: lb_().slice(0, 50) };
+  if (op === 'board') return { ok: true, board: lb_().slice(0, 50), week: lw_().slice(0, 50), wkEnd: weekEnd_(weekKey_(Date.now())) };
+  if (op === 'peek') {
+    const names = (Array.isArray(o.names) ? o.names : []).slice(0, 30).map(x => String(x || '').toLowerCase()).filter(x => NAME_RE.test(x)), out = [];
+    const inLb = {}; lb_().forEach(r => { inLb[r[0]] = r; }); const inLw = {}; lw_().forEach(r => { inLw[r[0]] = r; });
+    names.forEach(n => { if (inLb[n]) out.push([n, inLb[n][1], inLb[n][2], inLw[n] ? inLw[n][1] : 0]); else { const a = getAcct_(n); if (a) out.push([n, a.nw || START_, a.tn || 0, a.wk === weekKey_(Date.now()) && a.w0 > 0 ? (a.nw / a.w0 - 1) : 0]); } });
+    return { ok: true, people: out };
+  }
   const u = String(o.u || '').toLowerCase();
   if (!NAME_RE.test(u)) return { error: 'name' };
   if (op === 'signup') {
@@ -57,11 +72,11 @@ function handle_(o) {
     return withLock_(() => {
       if (getAcct_(u)) return { error: 'taken' };
       const salt = rand_(16), code = rand_(12), rs = rand_(16);
-      const a = { s: salt, h: slow_(salt, p), rs: rs, rh: slow_(rs, code), tk: [], nw: START_, tn: 0, ts: Date.now(), sv: '' };
+      const a = { s: salt, h: slow_(salt, p), rs: rs, rh: slow_(rs, code), tk: [], nw: START_, tn: 0, ts: Date.now(), sv: '', wk: weekKey_(Date.now()), w0: START_ };
       const t = newToken_(a);
       const nw = num_(o.nw, 0, 1e9); if (nw !== null) { a.nw = nw; a.tn = num_(o.tn, 0, 1e7) || 0; }
       if (typeof o.sv === 'string' && o.sv.length <= MAX_SAVE) a.sv = o.sv;
-      putAcct_(u, a); setRow_(u, a.nw, a.tn);
+      putAcct_(u, a); setRow_(u, a.nw, a.tn, a.w0 > 0 ? a.nw / a.w0 - 1 : 0);
       return { ok: true, token: t, code: code };
     });
   }
@@ -83,10 +98,21 @@ function handle_(o) {
     const nw = num_(o.nw, 0, 1e9), tn = num_(o.tn, 0, 1e7); if (nw === null || tn === null) return { error: 'bad' };
     return withLock_(() => {
       const a = authed_(u, o.t); if (!a) return { error: 'auth' };
-      a.nw = nw; a.tn = Math.floor(tn); a.ts = Date.now();
+      const wg = weekGain_(a, nw); a.nw = nw; a.tn = Math.floor(tn); a.ts = Date.now();
       if (typeof o.sv === 'string') a.sv = o.sv.length <= MAX_SAVE ? o.sv : a.sv;
-      putAcct_(u, a); setRow_(u, nw, a.tn);
+      putAcct_(u, a); setRow_(u, nw, a.tn, wg);
       return { ok: true };
+    });
+  }
+  if (op === 'manip') {
+    const tk = String(o.tk || ''), dir = Number(o.dir) > 0 ? 1 : -1, lv = Math.floor(Number(o.lv));
+    if (!/^[A-Z0-9]{2,5}$/.test(tk) || !(lv >= 6 && lv <= 40)) return { error: 'bad' };
+    return withLock_(() => {
+      const a = authed_(u, o.t); if (!a) return { error: 'auth' };
+      const now = Date.now(); if (a.mc && now - a.mc < 6 * 3600e3) return { error: 'cooldown', next: a.mc + 6 * 3600e3 };
+      let q = []; try { q = JSON.parse(P.getProperty('mq') || '[]'); } catch (e) { }
+      q = q.filter(x => now - x[1] < 24 * 3600e3); q.push([rand_(8), now, tk, dir, lv]); P.setProperty('mq', JSON.stringify(q.slice(-60)));
+      a.mc = now; putAcct_(u, a); return { ok: true, next: now + 6 * 3600e3 };
     });
   }
   if (op === 'load') { const a = authed_(u, o.t); return a ? { ok: true, sv: a.sv || '' } : { error: 'auth' }; }
@@ -95,7 +121,7 @@ function handle_(o) {
     return withLock_(() => {
       const a = authed_(u, o.t); if (!a) return { error: 'auth' };
       delAcct_(u);
-      P.setProperty('lb', JSON.stringify(lb_().filter(r => r[0] !== u)));
+      P.setProperty('lb', JSON.stringify(lb_().filter(r => r[0] !== u))); P.setProperty('lw', JSON.stringify(lw_().filter(r => r[0] !== u)));
       return { ok: true };
     });
   }
@@ -107,4 +133,8 @@ function doPost(e) {
   let o; try { o = JSON.parse(e.postData.contents); } catch (x) { return out_({ error: 'bad' }); }
   try { return out_(handle_(o)); } catch (x) { return out_({ error: 'server' }); }
 }
-function doGet(e) { return out_(e && e.parameter && e.parameter.board ? { ok: true, board: lb_().slice(0, 50) } : { ok: true, game: 'stonks' }); }
+function doGet(e) {
+  const p = (e && e.parameter) || {};
+  if (p.manip) { let q = []; try { q = JSON.parse(P.getProperty('mq') || '[]'); } catch (x) { } return out_({ ok: true, q: q }); }
+  return out_(p.board ? { ok: true, board: lb_().slice(0, 50), week: lw_().slice(0, 50), wkEnd: weekEnd_(weekKey_(Date.now())) } : { ok: true, game: 'stonks' });
+}

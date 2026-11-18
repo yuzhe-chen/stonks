@@ -5,6 +5,7 @@ import path from 'node:path';
 import { buildWorld, SECTORS } from './world.mjs';
 import { FEEDS, fetchFeed, classify } from './news.mjs';
 import { macroReturn, marketReturn } from './history.mjs';
+import { MANIP_UP, MANIP_DOWN, MANIP_DEK } from './templates.mjs';
 import { GOOD, BAD, SECTOR_GOOD, SECTOR_BAD, MARKET_GOOD, MARKET_BAD, DEKS, WILD, BRRR, SCHED } from './templates.mjs';
 
 const dir = process.argv[2] || 'data';
@@ -144,6 +145,25 @@ const quiet = now - (st.lastReal || 0) > 90 * 60e3;
 if (rnd() < (quiet ? 0.1 : 0.025)) newEvents.push(wildEvent());
 if (rnd() < 0.005) newEvents.push(brrrEvent());
 
+// player manipulations (level 6 and up): a public queue on the accounts backend; each becomes a rumor event
+const API_URL = 'https://script.google.com/macros/s/AKfycbxYXFH6l7MikjO7xmTkDmKI95gPTzgykEAP8duVJvC9BEqBT5yaw5fhJU27R3Kl5a73/exec';
+st.mseen = st.mseen || [];
+if (!process.env.NO_NET) {
+  try {
+    const r = await fetch(API_URL + '?manip=1', { signal: AbortSignal.timeout(20000) }), j = await r.json();
+    let n = 0;
+    for (const [mid, , tk, dir, lv] of (j.q || [])) {
+      if (st.mseen.includes(mid) || n >= 5) continue; st.mseen.push(mid);
+      const c = coInfo[tk], limit = lv >= 10 ? 250 : [0, 0, 0, 0, 0, 0, 10, 25, 50, 100][lv];   // how far a player's reach goes: the price of the stocks they can move
+      if (!c || !(st.p[tk] <= limit)) continue;
+      const mag = Math.min(8, 2 + (lv - 5)) * (dir > 0 ? 1 : -1);
+      const head = fill0(pickT(dir > 0 ? MANIP_UP : MANIP_DOWN)).replace('{co}', c.n);
+      newEvents.push({ id: mkId(), t: now, kind: 'manip', label: 'Rumor', sec: c.s, tpl: lastKey, head, dek: pickDek(MANIP_DEK), src: null, fx: {}, cos: { [tk]: mag } }); n++;
+    }
+    st.mseen = st.mseen.slice(-200);
+  } catch (e) { console.log('manipulation queue unavailable'); }
+}
+
 // ---- 2. simulation
 const sf = {}; SECTORS.forEach(s => { sf[s.id] = 0; });
 function advance(minutes) {
@@ -193,6 +213,7 @@ function slotsBetween(a, b) {
     const add = (kind, h, m) => { const at = t0 + (h * 60 + m) * 60e3; if (at > a && at <= b) out.push({ id: kind + date, kind, at, date }); };
     if (dow === 3) add('rate', 18, 0);
     if (dow === 5) add('jobs', 13, 30);
+    if (dow === 0) add('week', 20, 0);
     if (dow >= 1 && dow <= 5) add('earn', 21, 0);
   }
   return out;
@@ -201,7 +222,7 @@ function slotOutcome(slot) {
   const h = hash('o:' + slot.id), dir = (h & 1) ? 1 : -1, u = ((h >>> 3) % 1000) / 1000;
   const co = slot.kind === 'earn' ? back[hash('earn' + slot.date) % back.length] : null;
   const hint = ((h >>> 12) % 10) < 7 ? dir : -dir;                       // a tip is right 70 percent of the time
-  return { dir, mag: slot.kind === 'earn' ? 4 + u * 11 : 0.8 + u * 2.7, co, hint };
+  return { dir, mag: slot.kind === 'earn' ? 4 + u * 11 : slot.kind === 'week' ? 2.5 + u * 3.5 : 0.8 + u * 2.7, co, hint };
 }
 function slotEvent(slot) {
   const o = slotOutcome(slot), T = SCHED[slot.kind], h = hash('t:' + slot.id);
@@ -210,7 +231,7 @@ function slotEvent(slot) {
   const arr = o.dir > 0 ? T.up : T.down, head = arr[h % arr.length].replace('{co}', co ? co.n : '').replace('{ceo}', co ? co.ceo : '');
   const ev = { id: 's-' + slot.id, t: slot.at, kind: 'sched', label: T.label, sec: co ? co.s : 'market', head, dek, src: null, fx: {}, cos: {} };
   if (co) ev.cos[co.t] = r1(o.dir * o.mag);
-  else SECTORS.forEach(s => { ev.fx[s.id] = r1(o.dir * o.mag * s.beta * 0.8); });
+  else SECTORS.forEach(s => { let f = o.dir * o.mag * s.beta * 0.8; if (slot.kind === 'week') { const h = hash(s.id + slot.id); f *= 0.3 + 1.4 * ((h % 100) / 100); if (h % 5 === 0) f *= -0.6; } ev.fx[s.id] = r1(f); });
   return ev;
 }
 function upcoming() {
@@ -254,12 +275,51 @@ land(newEvents);
 st.t = now; st.lastRun = now;
 record(now);
 
+// ---- bots: invented players, so the leaderboard has company. Each one holds a real portfolio of the game's stocks, so its net
+// worth moves with the same market and headlines as everyone else's. 160 identities, 100 on the board at a time, 40 never leave.
+const BOT_N = 160, BOT_ACTIVE = 100, BOT_CORE = 40;
+const B1 = ['maya','devon','kyle','priya','marcus','lena','theo','nina','omar','zoe','felix','ruby','jonah','ivy','caleb','tara','noah','esme','hank','luca','june','rhys','mira','dax','cora','vince','anya','brett','sasha','leo','imani','owen','talia','gus','petra','miles','yara','quinn','jules','amir','bea','cruz','dina','eli','faye','gil','hana','ian'];
+const B2 = ['trades','invests','stonks','bags','dip','moon','whale','tendies','yolo','bull','bear','gains','margin','chart','dividend','lambo','brrr','paper','diamond','ape','broker','ticker','swing','candle','floor','alpha','hedge','short','long','pump','vault','coin'];
+function botNameOf(i, used) {
+  for (let k = 0; ; k++) {
+    const h = hash('bot' + i + ':' + k), a = B1[h % B1.length], b = B2[(h >>> 7) % B2.length], d = (h >>> 15) % 100, st2 = (h >>> 3) % 6;
+    const n = (st2 === 0 ? a + b + d : st2 === 1 ? a + '_' + b : st2 === 2 ? a + d : st2 === 3 ? b + a : st2 === 4 ? a + '_' + b + d : a + b).slice(0, 16);
+    if (!used.has(n)) { used.add(n); return n; }
+  }
+}
+const allTk = back.map(c => c.t).concat(idx.map(i => i.t));
+function botNW(b) { let v = b.cash; for (const t in b.pos) v += b.pos[t] * st.p[t]; return v; }
+function botBuy(b, spend) { const fav = b.fav, tk = rnd() < 0.6 && fav.length ? pick(back.filter(c => fav.includes(c.s))).t : pick(allTk); if (spend > 1 && st.p[tk]) { b.pos[tk] = (b.pos[tk] || 0) + spend / st.p[tk]; b.cash -= spend; } }
+const WKEY = Math.floor((now / 864e5 + 3) / 7);
+function botFresh(b, exact) {
+  // a starting net worth shaped like a real crowd: most near the start, a few rich, a few ruined
+  const K = Math.min(140000, Math.max(2200, Math.exp(Math.log(exact ? 11500 : 10000) + (exact ? 0.55 : 0.12) * gauss())));
+  b.cash = K; b.pos = {}; b.fav = [pick(SECTORS).id, pick(SECTORS).id]; b.tn = Math.floor((exact ? rnd() * rnd() * 420 : 0));
+  const parts = 2 + Math.floor(rnd() * 6), put = K * (0.5 + rnd() * 0.5);
+  for (let i = 0; i < parts; i++) botBuy(b, put / parts);
+  b.wk = WKEY; b.w0 = botNW(b) / (1 + (exact ? 0.07 * gauss() : 0));      // a week already under way, with a gain or loss to show
+}
+if (!st.bots) {
+  const used = new Set(); st.bots = [];
+  for (let i = 0; i < BOT_N; i++) { const b = { n: botNameOf(i, used), core: i < BOT_CORE, act: i < BOT_ACTIVE }; botFresh(b, true); st.bots.push(b); }
+}
+for (const b of st.bots) {
+  if (!b.act) continue;
+  if (b.wk !== WKEY) { b.wk = WKEY; b.w0 = botNW(b); }
+  if (rnd() < 0.02 && Object.keys(b.pos).length) { const t = pick(Object.keys(b.pos)); b.cash += b.pos[t] * st.p[t]; delete b.pos[t]; botBuy(b, b.cash * (0.3 + rnd() * 0.4)); }   // changes its mind now and then
+  if (rnd() < 0.05) b.tn += 1 + Math.floor(rnd() * 14);
+  if (!b.core && rnd() < 0.004) {                                                                                                  // leaves; someone from the reserve joins with a fresh start
+    const spare = st.bots.filter(x => !x.act); if (spare.length) { b.act = false; const j = pick(spare); j.act = true; botFresh(j, false); }
+  }
+}
+const botRows = st.bots.filter(b => b.act).map(b => [b.n, Math.round(botNW(b) * 100) / 100, b.tn, Math.round((botNW(b) / b.w0 - 1) * 10000) / 10000]).sort((a, b) => b[1] - a[1]);
+
 // ---- 3. write
 events = newEvents.concat(events).slice(0, MAX_EVENTS);
 st.seen = [...seen].slice(-2500);
 write('market.json', market);
 write('events.json', { t: now, events, upcoming: upcoming() });
-write('state.json', st); write('hist.json', H);
+write('state.json', st); write('hist.json', H); write('bots.json', { t: now, rows: botRows });
 bySector.index = idx.map(i => ({ t: i.t }));
 for (const s of SECTORS.map(x => x.id).concat('index')) {
   const out = {}; for (const k of ['w', 'm', 'd']) { out[k] = { ts: H[k].ts, c: {} }; bySector[s].forEach(c => { out[k].c[c.t] = H[k].c[c.t]; }); }
