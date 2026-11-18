@@ -45,6 +45,11 @@ if (!st || !market || !H) {
   allT.forEach(c => { market.c[c.t] = []; ['w', 'm', 'd'].forEach(k => { H[k].c[c.t] = []; }); });
   events = [];
 }
+// a renamed ticker keeps its history
+for (const [from, to] of Object.entries({ TWLN: 'DOUG' })) {
+  if (st.p[from] !== undefined && st.p[to] === undefined) { st.p[to] = st.p[from]; delete st.p[from]; if (st.o) { st.o[to] = st.o[from]; delete st.o[from]; } }
+  for (const m of [market, H.w, H.m, H.d]) if (m.c && m.c[from] && !m.c[to]) { m.c[to] = m.c[from]; delete m.c[from]; }
+}
 const seen = new Set(st.seen);
 let vmul = 1;                       // volatility of the minutes being simulated (a wild minute is a spike)
 
@@ -53,7 +58,21 @@ function fill(t, c, c2) {
   const s = secInfo[c.s];
   return t.replace(/\{co2\}/g, c2 ? c2.n : c.n).replace(/\{co\}/g, c.n).replace(/\{ceo\}/g, c.ceo).replace(/\{thing\}/g, s.thing).replace(/\{sector\}/g, s.name);
 }
+const fill0 = x => x;
 const newEvents = [];
+// the same template or sub line never appears twice near each other: a sliding window of what the last events used
+const recentQ = [], recentD = [];
+events.slice(0, 12).reverse().forEach(e => { if (e.tpl) recentQ.push(e.tpl); if (e.dek) recentD.push(e.dek); });
+let lastKey = '';
+const keyOf = x => hash(typeof x === 'string' ? x : x.t).toString(36);
+function pickT(arr) {
+  const win = recentQ.slice(-Math.min(8, arr.length - 1)), ok = arr.filter(x => !win.includes(keyOf(x)));
+  const t = pick(ok.length ? ok : arr); lastKey = keyOf(t); recentQ.push(lastKey); return t;
+}
+function pickDek(arr) {
+  const win = recentD.slice(-Math.min(6, arr.length - 1)), ok = arr.filter(x => !win.includes(x));
+  const d = pick(ok.length ? ok : arr); recentD.push(d); return d;
+}
 let uid = 0;
 const mkId = () => (now.toString(36) + (uid++).toString(36));
 
@@ -78,28 +97,29 @@ function realEvents(items) {
     if (usedSectors.has(sector)) continue;
     usedSectors.add(sector);
     const h = hash(it.title);
-    let fx = {}, cos = {}, head, dek, sec;
+    let fx = {}, cos = {}, head, dek, sec, tpl = '';
     if (k.macro) {
       SECTORS.forEach(s => { fx[s.id] = r1(k.macroMove * s.beta * 0.8); });
-      head = pick(k.macroMove > 0 ? MARKET_GOOD : MARKET_BAD); sec = 'market';
+      head = fill0(pickT(k.macroMove > 0 ? MARKET_GOOD : MARKET_BAD)); sec = 'market'; tpl = lastKey;
     } else {
       Object.entries(k.fx).forEach(([s, v]) => { if (Math.abs(v) >= 0.3) fx[s] = r1(v); });
       const pm = fx[k.primary] || 0, list = bySector[k.primary], co = list[h % list.length], co2 = list[(h >>> 5) % list.length === h % list.length ? (h + 1) % list.length : (h >>> 5) % list.length];
       sec = k.primary;
       if (h % 5 < 3) {            // one company takes the hit
         cos[co.t] = r1((pm >= 0 ? 1 : -1) * (2 + Math.abs(pm) * 1.4));
-        head = fill(pick(pm >= 0 ? GOOD : BAD), co, co2);
-      } else head = fill(pick(pm >= 0 ? SECTOR_GOOD : SECTOR_BAD), co, co2);
+        head = fill(pickT(pm >= 0 ? GOOD : BAD), co, co2); tpl = lastKey;
+      } else { head = fill(pickT(pm >= 0 ? SECTOR_GOOD : SECTOR_BAD), co, co2); tpl = lastKey; }
     }
-    dek = pick(DEKS);
-    out.push({ id: mkId(), t: now, kind: 'real', sec, head, dek, src: it.src, fx, cos });
+    dek = pickDek(DEKS);
+    out.push({ id: mkId(), t: now, kind: 'real', sec, head, dek, tpl, src: it.src, url: it.link || '', fx, cos });
   }
   return out;
 }
 function wildEvent() {
-  const w = pick(WILD), s = pick(SECTORS), list = bySector[s.id], co = pick(list), co2 = pick(list);
+  const w = pickT(WILD), s = pick(SECTORS), list = bySector[s.id], co = pick(list), co2 = pick(list);
   const mag = w.mag * (0.8 + rnd() * 0.5) * (w.good ? 1 : -1);
-  return { id: mkId(), t: now, kind: 'wild', sec: s.id, head: fill(w.t, co, co2), dek: w.d, src: null, fx: { [s.id]: r1(mag * 0.12) }, cos: { [co.t]: r1(mag) } };
+  const wk = lastKey; recentD.push(w.d);
+  return { id: mkId(), t: now, kind: 'wild', sec: s.id, tpl: wk, head: fill(w.t, co, co2), dek: w.d, src: null, fx: { [s.id]: r1(mag * 0.12) }, cos: { [co.t]: r1(mag) } };
 }
 function brrrEvent() {
   const amt = pick([250, 500, 500, 1000, 2500]);
@@ -183,8 +203,9 @@ function slotOutcome(slot) {
 function slotEvent(slot) {
   const o = slotOutcome(slot), T = SCHED[slot.kind], h = hash('t:' + slot.id);
   const co = o.co;
+  const deks = [T.dek].concat(T.more || []), dek = deks[hash('d:' + slot.id) % deks.length];
   const arr = o.dir > 0 ? T.up : T.down, head = arr[h % arr.length].replace('{co}', co ? co.n : '').replace('{ceo}', co ? co.ceo : '');
-  const ev = { id: 's-' + slot.id, t: slot.at, kind: 'sched', label: T.label, sec: co ? co.s : 'market', head, dek: T.dek, src: null, fx: {}, cos: {} };
+  const ev = { id: 's-' + slot.id, t: slot.at, kind: 'sched', label: T.label, sec: co ? co.s : 'market', head, dek, src: null, fx: {}, cos: {} };
   if (co) ev.cos[co.t] = r1(o.dir * o.mag);
   else SECTORS.forEach(s => { ev.fx[s.id] = r1(o.dir * o.mag * s.beta * 0.8); });
   return ev;
@@ -198,8 +219,8 @@ function upcoming() {
 function seedWalk(from, to, step, wild) {
   for (let t = from + step; t <= to; t += step) {
     vmul = 1; advance(step / 60e3);
-    if (wild && rnd() < wild * step / 86400e3) { const e = wildEvent(); e.t = t; land([e]); if (to - t < 72 * 3600e3) events.unshift(e); }
-    for (const sl of slotsBetween(t - step, t)) { const e = slotEvent(sl); land([e]); if (to - t < 72 * 3600e3) events.unshift(e); }
+    if (wild && rnd() < wild * step / 86400e3) { const e = wildEvent(); e.t = t; land([e]); if (now - t < 72 * 3600e3) events.unshift(e); }
+    for (const sl of slotsBetween(t - step, t)) { const e = slotEvent(sl); land([e]); if (now - t < 72 * 3600e3) events.unshift(e); }
     record(t);
   }
 }

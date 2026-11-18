@@ -52,7 +52,9 @@ export async function fetchFeed(src, url) {
     const x = await r.text(), out = [];
     for (const m of x.matchAll(/<item[\s>]([\s\S]*?)<\/item>/g)) {
       const t = (m[1].match(/<title[^>]*>([\s\S]*?)<\/title>/) || [])[1], d = (m[1].match(/<pubDate[^>]*>([\s\S]*?)<\/pubDate>/) || [])[1];
-      if (t) out.push({ title: decode(t), t: d ? Date.parse(d) || 0 : 0, src });
+      let link = decode((m[1].match(/<link[^>]*>([\s\S]*?)<\/link>/) || [])[1] || '');
+      if (!/^https?:\/\/[^\s<>"]+$/.test(link)) link = '';
+      if (t) out.push({ title: decode(t), t: d ? Date.parse(d) || 0 : 0, src, link });
     }
     return out.slice(0, 25);
   } catch (e) { return []; }

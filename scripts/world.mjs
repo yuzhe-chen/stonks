@@ -105,7 +105,7 @@ export function buildWorld() {
   const ofSectors = ids => companies.filter(c => ids.includes(c.s)).map(c => c.t);
   const mk = (t, n, g, base, m) => ({ t, n, g, base, m, p0: m.reduce((a, x) => a + companies.find(c => c.t === x).p, 0), s: 'index', v: 1.6 });
   const indices = [
-    mk('TWLN', 'Tow Lones Industrial Average', 'Thirty serious companies and a feeling', 30000, ['bank', 'oil', 'auto', 'air', 'ship', 'food', 'retail', 'metal', 'home', 'pharma', 'insure', 'space'].flatMap(s => companies.filter(c => c.s === s).slice(0, 3).map(c => c.t)).slice(0, 30)),
+    mk('DOUG', 'Dough Jones Industrial Average', 'Thirty serious companies and a feeling', 30000, ['bank', 'oil', 'auto', 'air', 'ship', 'food', 'retail', 'metal', 'home', 'pharma', 'insure', 'space'].flatMap(s => companies.filter(c => c.s === s).slice(0, 3).map(c => c.t)).slice(0, 30)),
     mk('FSTQ', 'FASTDAQ Composite', 'Everything with a screen, a server or a dream', 15000, ofSectors(['chips', 'soft', 'ai', 'social', 'gadget', 'media', 'crypto'])),
     mk('SP2H', 'Standard and Poor-ish 200', 'The whole made-up economy in one number', 5000, companies.map(c => c.t)),
     mk('NERV', 'Nervous 20', 'The twenty companies that cannot sit still', 1000, companies.slice().sort((a, b) => b.v - a.v).slice(0, 20).map(c => c.t)),

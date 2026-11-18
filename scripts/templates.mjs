@@ -103,9 +103,9 @@ export const BRRR = [
 // Scheduled appointments (the page counts down to them). dir +1 good for the market, -1 bad.
 export const SCHED = {
   rate: { label: 'Rate decision', up: ['Central bank blinks, markets cheer', 'Rates held, traders announce they are "relieved"', 'Surprise cut, everyone pretends they expected it'],
-    down: ['Central bank hikes rates, markets sulk', 'Rate decision lands, traders discover they have feelings', 'Hawkish speech, doves not available for comment'], dek: 'A man read a statement slowly. Prices did the rest.' },
+    down: ['Central bank hikes rates, markets sulk', 'Rate decision lands, traders discover they have feelings', 'Hawkish speech, doves not available for comment'], dek: 'A man read a statement slowly. Prices did the rest.', more: ['Nobody read past the first sentence.', 'The word of the day was "patient".'] },
   jobs: { label: 'Jobs report', up: ['Jobs report beats forecasts, economists blame the weather anyway', 'Hiring surges, nobody can find the new jobs'],
-    down: ['Jobs report misses forecasts, economists blame the weather', 'Hiring stalls, "adjusted" numbers adjusted again'], dek: 'The number will be revised next month, quietly.' },
+    down: ['Jobs report misses forecasts, economists blame the weather', 'Hiring stalls, "adjusted" numbers adjusted again'], dek: 'The number will be revised next month, quietly.', more: ['Economists are "cautiously surprised".', 'The spreadsheet has been sent for review.'] },
   earn: { label: 'Earnings', up: ['{co} reports earnings, says "cautiously optimistic" and means it', '{co} beats earnings, {ceo} thanks "the team", the team is one intern', '{co} posts a profit, auditors request a recount'],
-    down: ['{co} reports earnings, {ceo} says "transitory" four times', '{co} misses earnings, blames "unprecedented normal conditions"', '{co} posts a loss, calls it "an investment in the future"'], dek: 'The call was forty minutes. The stock moved in four seconds.' },
+    down: ['{co} reports earnings, {ceo} says "transitory" four times', '{co} misses earnings, blames "unprecedented normal conditions"', '{co} posts a loss, calls it "an investment in the future"'], dek: 'The call was forty minutes. The stock moved in four seconds.', more: ['Analysts asked three questions and nodded at the rest.', 'The slide deck had a rocket on it.'] },
 };

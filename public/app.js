@@ -3,7 +3,7 @@ const LOCAL = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
 const REPO = 'yuzhe-chen/stonks';
 const LIVE = LOCAL ? ['/data/'] : [`https://raw.githubusercontent.com/${REPO}/data/`, `https://cdn.jsdelivr.net/gh/${REPO}@data/`];
 const COLD = LIVE;                                  // the CDN keeps branch files for 12 hours, so it is only the fallback
-const BOARD = { project: '', key: '' };           // filled in when the leaderboard backend exists
+const API = 'https://script.google.com/macros/s/AKfycbxYXFH6l7MikjO7xmTkDmKI95gPTzgykEAP8duVJvC9BEqBT5yaw5fhJU27R3Kl5a73/exec';   // accounts and the leaderboard (Apps Script, no Google permissions)
 const START = 10000, TIP_COST = 40;
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -27,7 +27,7 @@ function fresh() {
 }
 let S;
 try { S = Object.assign(fresh(), JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) { S = fresh(); }
-const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { } };
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { } queueSync(); };
 
 /* ---------- data ---------- */
 let W = null, M = null, E = null, base24 = {}, co = {}, secName = {}, idxs = {}, histCache = {};
@@ -116,17 +116,18 @@ const level = () => Math.floor(Math.sqrt(S.tendies / 20));
 const title = () => TITLES[Math.min(level(), TITLES.length - 1)];
 
 /* ---------- trading ---------- */
-function trade(t, side, dollars) {
+function trade(t, side, dollars, all) {
   if (inJail()) return 'You are in jail. Trading is not allowed.';
   const px = shown(t); if (!px || !(dollars > 0)) return 'Enter an amount.';
   if (side === 'buy') {
-    if (dollars > S.cash + 1e-9) return 'Not enough cash.';
+    if (dollars > S.cash + 0.005) return 'Not enough cash.';
+    dollars = Math.min(dollars, S.cash);
     const sh = dollars / px, p = S.pos[t] || (S.pos[t] = { sh: 0, cost: 0 });
     p.sh += sh; p.cost += dollars; S.cash -= dollars;
     S.trades.push({ t: Date.now(), tk: t, side, sh, px, chg: chg24(t) });
   } else {
     const p = S.pos[t]; if (!p || p.sh < 1e-9) return 'You do not own any.';
-    const val = p.sh * px, d = Math.min(dollars, val), sh = d / px, frac = sh / p.sh, basis = p.cost * frac;
+    const val = p.sh * px, d = all ? val : Math.min(dollars, val), sh = d / px, frac = sh / p.sh, basis = p.cost * frac;
     p.sh -= sh; p.cost -= basis; S.cash += d;
     if (p.sh < 1e-9) delete S.pos[t];
     S.trades.push({ t: Date.now(), tk: t, side, sh, px, chg: chg24(t) });
@@ -159,9 +160,9 @@ function quests() {
   const dip = S.trades.some(x => x.side === 'buy' && x.chg <= -0.02 && new Date(x.t).toISOString().slice(0, 10) === d);
   const rd = S.read[d] || 0;
   return [
-    { id: 'dip', t: 'Buy da Dip', d: 'Buy a stock that is down 2% or more over the last day.', ok: dip, p: dip ? 'Done' : 'Not yet', r: 25 },
-    { id: 'bags', t: 'Spread the Bags', d: 'Hold shares in 4 different sectors at once.', ok: sectors.size >= 4, p: sectors.size + ' of 4 sectors', r: 25 },
-    { id: 'read', t: 'Read the Room', d: 'Open 3 headlines in the feed.', ok: rd >= 3, p: Math.min(rd, 3) + ' of 3', r: 15 },
+    { id: 'dip', t: 'Buy da Dip', d: 'Buy a stock that is down 2% or more over the last day.', ok: dip, p: dip ? 'Done' : 'Not yet', r: 25, pr: dip ? 1 : 0 },
+    { id: 'bags', t: 'Spread the Bags', d: 'Hold shares in 4 different sectors at once.', ok: sectors.size >= 4, p: sectors.size + ' of 4 sectors', r: 25, pr: Math.min(1, sectors.size / 4) },
+    { id: 'read', t: 'Read the Room', d: 'Open 3 headlines in the feed.', ok: rd >= 3, p: Math.min(rd, 3) + ' of 3', r: 15, pr: Math.min(1, rd / 3) },
   ].map(q => (q.claimed = !!S.claimed[d + ':' + q.id], q));
 }
 
@@ -179,28 +180,62 @@ function maybeNotify() {
 }
 function updateTitle() { const r = ret(), l = ladder(r); document.title = `${l[0].toUpperCase()} ${pct(r)} | Stonks`; }
 
-/* ---------- leaderboard (Firestore over REST, the document id is the player's random id) ---------- */
-let boardAt = 0;
-async function submitBoard(force) {
-  if (!BOARD.project || Date.now() - boardAt < (force ? 0 : 60000)) return;
-  boardAt = Date.now();
-  const nw = Math.max(0, Math.round(netWorth() * 100) / 100);
-  try {
-    await fetch(`https://firestore.googleapis.com/v1/projects/${BOARD.project}/databases/(default)/documents/board/${S.id}?key=${BOARD.key}`, {
-      method: 'PATCH', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ fields: { name: { stringValue: S.name }, nw: { doubleValue: nw }, tendies: { integerValue: String(S.tendies) }, ts: { integerValue: String(Date.now()) } } }) });
-  } catch (e) { }
+/* ---------- accounts, cloud save and the leaderboard (a small Apps Script backend) ---------- */
+async function api(body) {
+  try { const r = await fetch(API, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: JSON.stringify(body) }); return await r.json(); }
+  catch (e) { return { error: 'net' }; }
 }
-async function loadBoard() {
-  if (!BOARD.project) return null;
+const SYNC_KEYS = ['cash', 'dep', 'pos', 'tendies', 'claimed', 'brrr', 'badges', 'read', 'tips', 'sells', 'peak', 'fines', 'opts', 'optLog', 'jailUntil', 'donated', 'lists', 'sorts'];
+const b64 = u8 => btoa(String.fromCharCode(...u8)), unb64 = t => Uint8Array.from(atob(t), c => c.charCodeAt(0));
+async function packSave() {
+  const o = {}; SYNC_KEYS.forEach(k => { o[k] = S[k]; });
+  const j = JSON.stringify(o);
+  try { const st = new Blob([j]).stream().pipeThrough(new CompressionStream('gzip')); return 'z:' + b64(new Uint8Array(await new Response(st).arrayBuffer())); } catch (e) { return 'j:' + j; }
+}
+async function unpackSave(sv) {
+  if (!sv || sv.length < 3) return null;
   try {
-    const r = await fetch(`https://firestore.googleapis.com/v1/projects/${BOARD.project}/databases/(default)/documents:runQuery?key=${BOARD.key}`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'board' }], orderBy: [{ field: { fieldPath: 'nw' }, direction: 'DESCENDING' }], limit: 50 } }) });
-    const j = await r.json();
-    return j.filter(x => x.document).map(x => { const f = x.document.fields, id = x.document.name.split('/').pop(); return { id, name: f.name.stringValue, nw: Number(f.nw.doubleValue ?? f.nw.integerValue), tendies: Number(f.tendies ? f.tendies.integerValue : 0) }; });
+    if (sv.startsWith('z:')) { const st = new Blob([unb64(sv.slice(2))]).stream().pipeThrough(new DecompressionStream('gzip')); return JSON.parse(await new Response(st).text()); }
+    return JSON.parse(sv.slice(2));
   } catch (e) { return null; }
 }
+function applySave(o) { if (!o || typeof o !== 'object') return; SYNC_KEYS.forEach(k => { if (o[k] !== undefined) S[k] = o[k]; }); }
+let syncT = 0, syncAt = 0;
+function queueSync() { if (!S.acct || syncT) return; syncT = setTimeout(() => { syncT = 0; syncNow(); }, 20000); }
+async function syncNow() {
+  if (!S.acct || !M) return;
+  clearTimeout(syncT); syncT = 0; syncAt = Date.now();
+  const nw = Math.max(0, Math.round(netWorth() * 100) / 100);
+  const r = await api({ op: 'save', u: S.acct.u, t: S.acct.t, nw, tn: S.tendies, sv: await packSave() });
+  if (r && r.error === 'auth') { S.acct = null; try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { } renderMe(); }
+}
+const submitBoard = queueSync;
+let accMode = 'in', accMsg = '', lastCode = '';
+async function accountAction(kind) {
+  const u = ($('#au') && $('#au').value || '').trim().toLowerCase(), p = $('#ap') ? $('#ap').value : '';
+  const say = m => { accMsg = m; const e = $('#accmsg'); if (e) e.textContent = m; };
+  if (!/^[a-z0-9_]{3,16}$/.test(u)) return say('Usernames are 3 to 16 letters, numbers or underscores.');
+  if (p.length < 6) return say('Passwords need at least 6 characters.');
+  say('Working on it...');
+  let r;
+  if (kind === 'up') {
+    r = await api({ op: 'signup', u, p, nw: Math.max(0, netWorth()), tn: S.tendies, sv: await packSave() });
+    if (r.ok) { S.acct = { u, t: r.token }; S.name = u; lastCode = r.code; save(); }
+  } else if (kind === 'in') {
+    r = await api({ op: 'login', u, p });
+    if (r.ok) { S.acct = { u, t: r.token }; S.name = u; applySave(await unpackSave(r.sv)); lastCode = ''; save(); }
+  } else if (kind === 'rec') {
+    const code = ($('#ac') && $('#ac').value || '').trim();
+    r = await api({ op: 'recover', u, code, p });
+    if (r.ok) { S.acct = { u, t: r.token }; S.name = u; applySave(await unpackSave(r.sv)); lastCode = ''; save(); }
+  }
+  const errs = { taken: 'That username is taken.', wrong: 'Wrong username, password or code.', slow: 'Too many tries. Wait a few minutes.', full: 'The game is full for now.', net: 'Could not reach the server.', password: 'Passwords need 6 to 64 characters.', name: 'Pick a different username.' };
+  if (!r.ok) return say(errs[r.error] || 'Something went wrong.');
+  accMsg = ''; accMode = 'in'; renderMe(); if (!$('#settings').hidden) openSettings(); render();
+}
+async function signOut() { const a = S.acct; S.acct = null; lastCode = ''; save(); if (a) api({ op: 'logout', u: a.u, t: a.t }); openSettings(); renderMe(); }
+async function deleteAccount() { const a = S.acct; if (!a) return; const r = await api({ op: 'delete', u: a.u, t: a.t }); if (r.ok) { S.acct = null; lastCode = ''; save(); openSettings(); renderMe(); } else { accMsg = 'Could not delete. Try again.'; openSettings(); } }
+async function loadBoard() { const r = await api({ op: 'board' }); return r && r.ok ? r.board.map(x => ({ u: x[0], nw: x[1], tn: x[2] })) : null; }
 
 /* ---------- charts ---------- */
 const RANGES = [['1D', null], ['1W', 'w'], ['1M', 'm'], ['1Y', 'd'], ['All', 'd']];
@@ -223,10 +258,13 @@ function chartSVG(pts) {
   const v = pts.map(p => p[1]), lo = Math.min(...v), hi = Math.max(...v), r = hi - lo || 1, up = v[v.length - 1] >= v[0];
   const X = i => i / (pts.length - 1) * 600, Y = y => 228 - (y - lo) / r * 214;
   const d = pts.map((p, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(p[1]).toFixed(1)).join('');
-  return `<svg class="chart" id="chart" viewBox="0 0 600 240" preserveAspectRatio="none"><line x1="0" x2="600" y1="${Y(v[0]).toFixed(1)}" y2="${Y(v[0]).toFixed(1)}" stroke="var(--line)" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/><path d="${d}" fill="none" stroke="${up ? 'var(--up)' : 'var(--down)'}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
+  return `<svg class="chart" id="chart" viewBox="0 0 600 240" preserveAspectRatio="none"><line id="vl" x1="0" x2="0" y1="0" y2="240" stroke="var(--gray)" stroke-width="1" vector-effect="non-scaling-stroke" visibility="hidden"/><line x1="0" x2="600" y1="${Y(v[0]).toFixed(1)}" y2="${Y(v[0]).toFixed(1)}" stroke="var(--line)" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/><path d="${d}" fill="none" stroke="${up ? 'var(--up)' : 'var(--down)'}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
 }
 
 /* ---------- views ---------- */
+const ORDER_MS = 2500;
+let pending = false;
+function holdOrder(msgEl, sel) { pending = true; msgEl.className = 'msg'; msgEl.innerHTML = '<span class="prog"><i></i></span>Placing order...'; document.querySelectorAll(sel).forEach(x => { x.disabled = true; }); }
 let mode = 'buy', route = 'feed', arg = '', rangeSel = '1D', search = '', sortBy = 'move', hoverPts = null;
 const main = $('#main');
 function setRoute() {
@@ -245,12 +283,11 @@ function chips(ev) {
 function evHTML(ev) {
   const tag = ev.kind === 'real' ? 'Real news' : ev.kind === 'wild' ? 'Wild' : ev.kind === 'brrr' ? 'Brrr' : ev.label || 'Scheduled';
   const brrrOK = ev.kind === 'brrr' && !S.brrr[ev.id] && Date.now() - ev.t < 24 * 3600e3;
-  const more = ev.kind === 'real' ? `<div class="src">Inspired by a headline from ${esc(ev.src || 'the news')}. The companies are invented.</div>` : '';
-  return `<div class="ev" data-id="${esc(ev.id)}"><div class="tm">${ago(ev.t)}<span class="tag ${ev.kind === 'brrr' ? 'up' : ''}">${esc(tag)}</span></div>
+  return `<div class="ev${ev.url && /^https?:\/\//.test(ev.url) ? ' link' : ''}" data-id="${esc(ev.id)}" ${ev.url && /^https?:\/\//.test(ev.url) ? `data-url="${esc(ev.url)}"` : ''}><div class="tm">${ago(ev.t)}<span class="tag ${ev.kind === 'brrr' ? 'up' : ''}">${esc(tag)}</span></div>
     <div><div class="hd">${esc(ev.head)}</div><div class="dk">${esc(ev.dek || '')}</div>
     <div class="chips">${chips(ev)}</div>
     ${brrrOK ? `<div class="chips"><button class="go" data-brrr="${esc(ev.id)}" data-amt="${ev.amt}">Claim ${money(ev.amt, 0)}</button></div>` : ev.kind === 'brrr' && S.brrr[ev.id] ? '<div class="dk">Claimed.</div>' : ''}
-    <div class="more">${more}</div></div></div>`;
+    </div></div>`;
 }
 function awayHTML() {
   if (!S.last || !held().length) return '';
@@ -273,38 +310,70 @@ function upcomingHTML() {
   }).join('') + `<div class="gray" id="tipmsg"></div>`;
 }
 function vFeed() {
-  if (!E) return '<div class="empty">Loading the news.</div>';
+  if (!E) return '<div class="empty">Loading...</div>';
   main.innerHTML = `<h2>Feed</h2>${inJail() || S.cash < 0 || broke() ? statusBanner() : ''}${awayHTML()}${upcomingHTML()}<h3>Latest</h3>${E.events.slice(0, 40).map(evHTML).join('')}`;
 }
-function rowsHTML(list) {
-  return `<table><thead><tr><th>Name</th><th>Price</th><th>24h</th><th></th></tr></thead><tbody>${list.map(c => {
-    const ch = chg24(c.t), pts = M ? series(c.t, '1D') : null;
-    return `<tr class="row" data-go="co/${c.t}"><td><span class="b">${c.t}</span><span class="nm">${esc(c.n)}</span></td><td data-px="${c.t}">${num(shown(c.t))}</td><td data-chg="${c.t}" class="${cls(ch)}">${pct(ch)}</td><td class="sp">${sparkSVG(pts, ch >= 0)}</td></tr>`;
+/* ---------- sorting and watchlists ---------- */
+const dchg = t => shown(t) - (base24[t] || shown(t));
+const SORTS = { name: (a, b) => a.n.localeCompare(b.n), price: (a, b) => shown(a.t) - shown(b.t), chg: (a, b) => chg24(a.t) - chg24(b.t), dchg: (a, b) => dchg(a.t) - dchg(b.t) };
+const SORT_LABEL = { custom: 'Custom', name: 'A to Z', price: 'Price', chg: '% change', dchg: '$ change' };
+function sortOf(isList) { const v = (S.sorts || {})[isList ? 'list' : 'main']; return v || (isList ? { k: 'custom', d: 1 } : { k: 'chg', d: -1 }); }
+const applySort = (list, isList) => { const s2 = sortOf(isList); return s2.k === 'custom' ? list : list.slice().sort((a, b) => SORTS[s2.k](a, b) * s2.d); };
+function sortBar(isList) {
+  const cur = sortOf(isList), ks = isList ? ['custom', 'name', 'price', 'chg', 'dchg'] : ['name', 'price', 'chg', 'dchg'];
+  return `<div class="sortbar"><span class="gray">Sort</span>${ks.map(k => `<button data-sort="${k}" class="${cur.k === k ? 'on' : ''}">${SORT_LABEL[k]}${cur.k === k && k !== 'custom' ? (cur.d > 0 ? ' ▲' : ' ▼') : ''}</button>`).join('')}</div>`;
+}
+const wls = () => S.lists || (S.lists = []);
+const inAny = t => wls().some(l => l.tks.includes(t));
+function defaultList() { if (!wls().length) wls().push({ id: 'w' + Date.now().toString(36), name: 'Watchlist', tks: [] }); return wls()[0]; }
+function toggleStar(t) { if (inAny(t)) wls().forEach(l => { l.tks = l.tks.filter(x => x !== t); }); else defaultList().tks.push(t); save(); }
+function newList(name) { name = String(name || '').replace(/[<>]/g, '').trim().slice(0, 24); if (!name || wls().length >= 12) return null; const l = { id: 'w' + Date.now().toString(36), name, tks: [] }; wls().push(l); save(); return l; }
+function moveTk(l, t, before) { const a = l.tks.filter(x => x !== t), i = before ? a.indexOf(before) : a.length; a.splice(i < 0 ? a.length : i, 0, t); l.tks = a; }
+function rowsHTML(list, o = {}) {
+  const sorted = applySort(list, !!o.list), custom = !!o.list && sortOf(true).k === 'custom';
+  return `${sortBar(!!o.list)}<table><thead><tr>${custom ? '<th></th>' : ''}<th>Name</th><th>Price</th><th>24h</th><th class="hm">24h $</th><th class="hm"></th>${o.list ? '<th></th>' : ''}</tr></thead><tbody>${sorted.map(c => {
+    const ch = chg24(c.t), d = dchg(c.t), pts = M ? series(c.t, '1D') : null;
+    return `<tr class="row" data-go="co/${c.t}" ${custom ? `draggable="true" data-dt="${c.t}"` : ''}>${custom ? `<td class="ord"><button data-mv="up" data-t="${c.t}" aria-label="Move up">▲</button><button data-mv="dn" data-t="${c.t}" aria-label="Move down">▼</button></td>` : ''}
+      <td><span class="nmrow"><button class="star ${inAny(c.t) ? 'on' : ''}" data-star="${c.t}" aria-label="Watch">${inAny(c.t) ? '★' : '☆'}</button><span><span class="b">${c.t}</span><span class="nm">${esc(c.n)}</span></span></span></td>
+      <td data-px="${c.t}">${num(shown(c.t))}</td><td data-chg="${c.t}" class="${cls(ch)}">${pct(ch)}</td><td class="hm ${cls(d)}">${d >= 0 ? '+' : '-'}${num(Math.abs(d))}</td><td class="sp hm">${sparkSVG(pts, ch >= 0)}</td>
+      ${o.list ? `<td><button data-wlrm="${o.list}" data-t="${c.t}" aria-label="Remove">✕</button></td>` : ''}</tr>`;
   }).join('')}</tbody></table>`;
 }
 function vMarket() {
-  if (!W || !M) { main.innerHTML = '<div class="empty">Loading the market.</div>'; return; }
+  if (!W || !M) { main.innerHTML = '<div class="empty">Loading...</div>'; return; }
   const sectors = W.sectors;
-  if (arg && arg !== 'index' && arg !== 'pennies' && !secName[arg]) arg = '';
-  if (arg === 'pennies') { const l = W.companies.filter(c => shown(c.t) < 10).sort((a, b) => b.v - a.v); main.innerHTML = `<div class="crumb"><a href="#market">Market</a> / Penny stocks</div><h2>Penny stocks</h2><div class="gray" style="margin-bottom:var(--b)">Everything under $10. Cheap to buy, wild to hold.</div>${rowsHTML(l)}`; return; }
-  if (arg === 'index') { main.innerHTML = `<div class="crumb"><a href="#market">Market</a> / Index funds</div><h2>Index funds</h2>${rowsHTML(W.indices)}`; return; }
-  if (arg) {
-    const list = W.companies.filter(c => c.s === arg).sort((a, b) => sortBy === 'name' ? a.n.localeCompare(b.n) : chg24(b.t) - chg24(a.t));
-    main.innerHTML = `<div class="crumb"><a href="#market">Market</a> / ${esc(secName[arg])}</div><h2>${esc(secName[arg])}</h2>${rowsHTML(list)}`; return;
+  if (arg.startsWith('list:')) {
+    const l = wls().find(x => x.id === arg.slice(5));
+    if (!l) { location.hash = '#market'; return; }
+    const items = l.tks.map(t => co[t]).filter(Boolean);
+    main.innerHTML = `<div class="crumb"><a href="#market">Market</a> / ${esc(l.name)}</div><h2>${esc(l.name)}</h2>
+      <form class="tools" id="wladdform"><input id="wladd" list="allco" placeholder="Add a ticker" autocomplete="off" autocapitalize="characters"><button>Add</button></form>
+      <datalist id="allco">${W.companies.concat(W.indices).map(c => `<option value="${c.t}">${esc(c.n)}</option>`).join('')}</datalist>
+      ${items.length ? rowsHTML(items, { list: l.id }) : '<div class="empty">Empty. Tap a star on any stock, or add a ticker above.</div>'}
+      <div class="row-btns" style="margin-top:var(--c)"><button data-wlren="${l.id}">Rename</button><button class="stop" data-wldel="${l.id}">Delete list</button></div>`;
+    return;
   }
+  if (arg === 'all') { main.innerHTML = `<div class="crumb"><a href="#market">Market</a> / All stocks</div><h2>All stocks</h2>${rowsHTML(W.companies)}`; return; }
+  if (arg === 'pennies') { const l = W.companies.filter(c => shown(c.t) < 10); main.innerHTML = `<div class="crumb"><a href="#market">Market</a> / Penny stocks</div><h2>Penny stocks</h2><div class="gray" style="margin-bottom:var(--b)">Everything under $10. Cheap to buy, wild to hold.</div>${rowsHTML(l)}`; return; }
+  if (arg === 'index') { main.innerHTML = `<div class="crumb"><a href="#market">Market</a> / Index funds</div><h2>Index funds</h2>${rowsHTML(W.indices)}`; return; }
+  if (arg && !secName[arg]) arg = '';
+  if (arg) { main.innerHTML = `<div class="crumb"><a href="#market">Market</a> / ${esc(secName[arg])}</div><h2>${esc(secName[arg])}</h2>${rowsHTML(W.companies.filter(c => c.s === arg))}`; return; }
   const q = search.trim().toLowerCase();
+  const head = `<h2>Market</h2>${broke() ? `<div class="note"><div class="b">Broke?</div>These are what you can afford. <a href="#market/pennies">Penny stocks</a>, mostly pharma.</div>` : ''}<div class="tools"><input id="q" placeholder="Search a name or ticker" value="${esc(search)}" autocomplete="off"></div>`;
   if (q) {
     const list = W.companies.concat(W.indices).filter(c => (c.t + ' ' + c.n).toLowerCase().includes(q)).slice(0, 40);
-    main.innerHTML = `<h2>Market</h2><div class="tools"><input id="q" placeholder="Search a name or ticker" value="${esc(search)}" autocomplete="off"></div>${list.length ? rowsHTML(list) : '<div class="empty">Nothing by that name. It might be a real company, those are not allowed here.</div>'}`;
+    main.innerHTML = head + (list.length ? rowsHTML(list) : '<div class="empty">Nothing by that name. It might be a real company, those are not allowed here.</div>');
     const i = $('#q'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); return;
   }
   const secs = sectors.map(s => { const l = W.companies.filter(c => c.s === s.id); return { s, ch: l.reduce((a, c) => a + chg24(c.t), 0) / l.length, n: l.length }; }).sort((a, b) => b.ch - a.ch);
-  main.innerHTML = `<h2>Market</h2>${broke() ? `<div class="note"><div class="b">Broke?</div>These are what you can afford. <a href="#market/pennies">Penny stocks</a>, mostly pharma.</div>` : ''}<div class="tools"><input id="q" placeholder="Search a name or ticker" autocomplete="off"></div>
+  main.innerHTML = head + `<h3>Watchlists</h3><div class="sec">${wls().map(l => `<a href="#market/list:${l.id}"><div class="n">${esc(l.name)}</div><div class="k">${l.tks.length} stock${l.tks.length === 1 ? '' : 's'}</div></a>`).join('')}
+      <div class="newlist"><form id="newlistform" class="nm-edit" style="justify-content:flex-start;margin:0"><input id="newlistin" maxlength="24" placeholder="New list" autocomplete="off"><button class="go">Make one</button></form></div></div>
     <h3>Index funds</h3>${rowsHTML(W.indices)}<h3>Sectors</h3>
-    <div class="sec">${secs.map(x => `<a href="#market/${x.s.id}"><div class="n">${esc(x.s.name)}</div><div class="c ${cls(x.ch)}">${arrow(x.ch)} ${pct(x.ch)}</div><div class="k">${x.n} companies</div></a>`).join('')}</div>`;
+    <div class="sec"><a href="#market/all"><div class="n">All stocks</div><div class="k">${W.companies.length} companies</div></a><a href="#market/pennies"><div class="n">Penny stocks</div><div class="k">Under $10</div></a>
+      ${secs.map(x => `<a href="#market/${x.s.id}"><div class="n">${esc(x.s.name)}</div><div class="c ${cls(x.ch)}">${arrow(x.ch)} ${pct(x.ch)}</div><div class="k">${x.n} companies</div></a>`).join('')}</div>`;
 }
 async function vCompany() {
-  if (!W || !M || !co[arg]) { main.innerHTML = '<div class="empty">Loading.</div>'; return; }
+  if (!W || !M || !co[arg]) { main.innerHTML = '<div class="empty">Loading...</div>'; return; }
   const c = co[arg], t = c.t, isIdx = !!idxs[t], p = S.pos[t];
   const sector = isIdx ? 'Index fund' : secName[c.s];
   const ch = chg24(t);
@@ -317,6 +386,7 @@ async function vCompany() {
     <div id="hov" class="gray" style="min-height:var(--c);margin-top:var(--b)"></div>
     <div id="chartbox"></div>
     <div class="ranges">${RANGES.map(r => `<button data-range="${r[0]}" class="${r[0] === rangeSel ? 'on' : ''}">${r[0]}</button>`).join('')}</div>${facts}
+    <h3>Watchlists</h3><div class="row-btns" style="flex-wrap:wrap">${wls().map(l => `<button data-wlt="${l.id}" class="${l.tks.includes(t) ? 'on' : ''}">${esc(l.name)}</button>`).join('')}<button data-wlnew="${t}">New list</button></div>
     ${rel.length ? '<h3>Recent news</h3>' + rel.map(evHTML).join('') : ''}</div>
   <div><div class="trade"><div class="row2"><span>Cash</span><span class="b" id="tcash">${money(S.cash)}</span></div>
     <div class="row2"><span>You own</span><span class="b" id="town">${p ? num(p.sh, 4) + ' shares' : 'none'}</span></div>
@@ -359,7 +429,7 @@ function buyOption(t) {
 }
 async function drawChart(t) {
   const box = $('#chartbox'); if (!box) return;
-  if (rangeSel !== '1D') { box.innerHTML = '<div class="empty" style="height:240px">Loading.</div>'; await ensureHist(t); }
+  if (rangeSel !== '1D') { box.innerHTML = '<div class="empty" style="height:240px">Loading...</div>'; await ensureHist(t); }
   if (route !== 'co' || arg !== t) return;
   let pts = series(t, rangeSel);
   if (!pts || pts.length < 2) { box.innerHTML = '<div class="empty" style="height:240px">No history yet.</div>'; return; }
@@ -371,10 +441,10 @@ async function drawChart(t) {
   const svg = $('#chart');
   svg.addEventListener('pointermove', e => {
     const r = svg.getBoundingClientRect(), i = Math.max(0, Math.min(pts.length - 1, Math.round((e.clientX - r.left) / r.width * (pts.length - 1))));
-    const d = new Date(pts[i][0]);
+    const d = new Date(pts[i][0]); const vl = $('#vl'); if (vl) { const x = i / (pts.length - 1) * 600; vl.setAttribute('x1', x); vl.setAttribute('x2', x); vl.setAttribute('visibility', 'visible'); }
     $('#hov').innerHTML = `<span class="b">${num(pts[i][1])}</span> ${d.toLocaleString([], rangeSel === '1D' || rangeSel === '1W' ? { weekday: 'short', hour: 'numeric', minute: '2-digit' } : { year: 'numeric', month: 'short', day: 'numeric' })}`;
   });
-  svg.addEventListener('pointerleave', () => { $('#hov').innerHTML = `<span class="${cls(span)}">${rangeSel}: ${pct(span)}</span>`; });
+  svg.addEventListener('pointerleave', () => { const vl = $('#vl'); if (vl) vl.setAttribute('visibility', 'hidden'); $('#hov').innerHTML = `<span class="${cls(span)}">${rangeSel}: ${pct(span)}</span>`; });
 }
 function statusBanner() {
   if (inJail()) return `<div class="note"><div class="b">You are in jail</div>Options fraud, apparently. Release in <span data-cd="${S.jailUntil}">${countdown(S.jailUntil - Date.now())}</span>. Your assets were seized and the debt is forgiven. The commissary takes cash only.</div>`;
@@ -393,7 +463,7 @@ function optionsPortfolioHTML() {
   ${lg.length ? `<div class="gray" style="margin-top:var(--b)">Recently expired</div>${lg.slice(0, 5).map(x => `<div>${x.tk} ${x.call ? 'CALL' : 'PUT'} ${num(x.K)}: paid ${money(x.paid)}, got ${money(x.pay)} <span class="${cls(x.pay - x.paid)}">${arrow(x.pay - x.paid)}</span></div>`).join('')}` : ''}`;
 }
 function vPortfolio() {
-  if (!M) { main.innerHTML = '<div class="empty">Loading.</div>'; return; }
+  if (!M) { main.innerHTML = '<div class="empty">Loading...</div>'; return; }
   const nw = netWorth(), r = ret(), l = ladder(r), hs = held();
   const sectors = {}; hs.forEach(t => { const s = (co[t] || {}).s || 'index'; sectors[s] = (sectors[s] || 0) + S.pos[t].sh * shown(t); });
   const tot = posValue() || 1;
@@ -404,32 +474,32 @@ function vPortfolio() {
     <div><div class="l">Cash</div><div class="v">${money(S.cash)}</div></div><div><div class="l">Invested</div><div class="v" id="pfinv">${money(posValue())}</div></div></div>
   ${hs.length ? `<table><thead><tr><th>Holding</th><th>Shares</th><th>Value</th><th>Gain</th></tr></thead><tbody>${hs.sort((a, b) => S.pos[b].sh * shown(b) - S.pos[a].sh * shown(a)).map(t => {
     const p = S.pos[t], v = p.sh * shown(t), g = v / p.cost - 1;
-    return `<tr class="row" data-go="co/${t}"><td><span class="b">${t}</span><span class="nm">${esc((co[t] || {}).n || '')}</span></td><td>${num(p.sh, 3)}</td><td>${money(v)}</td><td class="${cls(g)}">${pct(g)}</td></tr>`;
+    return `<tr class="row" data-go="co/${t}"><td><span class="nmrow"><span><span class="b">${t}</span><span class="nm">${esc((co[t] || {}).n || '')}</span></span>${g <= -0.3 ? '<span class="badge shame">Bagholder</span>' : ''}</span></td><td>${num(p.sh, 3)}</td><td>${money(v)}</td><td class="${cls(g)}">${pct(g)}</td></tr>`;
   }).join('')}</tbody></table>` : '<div class="empty">Nothing owned. Cash does not make Big Stonks.</div>'}
   ${hs.length ? `<h3>Where it sits</h3><div class="bars">${Object.entries(sectors).sort((a, b) => b[1] - a[1]).map(([s, v]) => `<div class="bb"><span>${esc(secName[s] || s)}</span><span class="t"><i style="width:${v / tot * 100}%"></i></span><span>${(v / tot * 100).toFixed(0)}%</span></div>`).join('')}</div>` : ''}
-  <h3>Badges</h3>${shown_b || '<div class="gray">None yet.</div>'}
   ${S.fines ? `<div class="gray" style="margin-top:var(--b)">Fined by the SEC so far: ${money(S.fines)}.</div>` : ''}
   ${optionsPortfolioHTML()}`;
 }
+const BADGE_INFO = { jail: 'Went to jail over options debt.', rekt: 'Fell 25% below your starting money.', bigbig: 'Reached 15% above your starting money.', diamond: 'Held a stock through an 8% drop from one headline.',
+  brrr3: 'Claimed 3 Brrr handouts.', basket: 'Held stocks in 8 sectors at once.', martha: 'Got caught by the SEC.', tipster: 'Bought an insider tip.' };
 function vQuests() {
   const qs = quests(), lv = level(), cur = S.tendies, lo = lv * lv * 20, hi = (lv + 1) * (lv + 1) * 20;
-  main.innerHTML = `<h2>Quests</h2><div class="lvl"><div class="t">${esc(title())}</div><div class="s">Level ${lv}. ${cur} tendies.</div></div>
-  <div class="meter"><i style="width:${Math.min(100, (cur - lo) / (hi - lo) * 100)}%"></i></div>
-  <h3>Today</h3>${qs.map((q, i) => `<div class="q ${i ? '' : 'first'}"><div><div class="qt">${esc(q.t)}</div><div class="qd">${esc(q.d)}</div><div class="qd">${esc(q.p)}. Pays ${q.r} tendies.</div></div>
-    ${q.claimed ? '<span class="gray">Claimed</span>' : `<button class="${q.ok ? 'go' : ''}" data-claim="${q.id}" ${q.ok ? '' : 'disabled'}>Claim</button>`}</div>`).join('')}
-  <h3>Insider tips</h3><div class="qd">Scheduled events show up in the feed with a countdown. A tip costs ${TIP_COST} tendies and is right about 70 percent of the time. Each tip has a 1 in 4 chance of getting you noticed by the SEC.</div>
-  <h3>Badges</h3>${Object.keys(BADGES).map(k => `<span class="badge ${S.badges[k] ? BADGES[k][1] : ''}">${BADGES[k][0]}</span>`).join('')}`;
+  main.innerHTML = `<h2>Quests</h2>
+  <div class="card lvlcard"><div class="lvl"><div class="t">${esc(title())}</div><div class="s">Level ${lv}, ${cur} tendies. ${hi - cur} more for the next title.</div></div><div class="meter"><i style="width:${Math.min(100, (cur - lo) / (hi - lo) * 100)}%"></i></div></div>
+  <h3>Today</h3><div class="cards">${qs.map(q => `<div class="card"><div class="card-h"><span class="qt">${esc(q.t)}</span><span class="reward">+${q.r}</span></div><div class="qd">${esc(q.d)}</div>
+    <div class="meter"><i style="width:${Math.round(q.pr * 100)}%"></i></div><div class="card-f"><span>${esc(q.p)}</span>${q.claimed ? '<span class="gray">Claimed</span>' : `<button class="${q.ok ? 'go' : ''}" data-claim="${q.id}" ${q.ok ? '' : 'disabled'}>Claim</button>`}</div></div>`).join('')}</div>
+  <h3>Badges</h3><div class="cards">${Object.keys(BADGES).map(k => { const got = !!S.badges[k]; return `<div class="card ${got ? 'got-' + BADGES[k][1] : ''}"><div class="card-h"><span class="qt">${BADGES[k][0]}</span><span class="gray">${got ? 'Earned' : 'Locked'}</span></div><div class="qd">${BADGE_INFO[k]}</div></div>`; }).join('')}</div>
+  <h3>Insider tips</h3><div class="card"><div class="qd">Scheduled events show up in the feed with a countdown. A tip costs ${TIP_COST} tendies and is right about 70 percent of the time. Each tip has a 1 in 4 chance of getting you noticed by the SEC.</div></div>`;
 }
 async function vBoard() {
-  main.innerHTML = '<h2>Wen Lambo</h2><div class="empty">Loading.</div>';
-  if (!BOARD.project) { main.innerHTML = '<h2>Wen Lambo</h2><div class="empty">The leaderboard is not connected yet.</div>'; return; }
-  await submitBoard(true);
+  main.innerHTML = '<h2>Wen Lambo</h2><div class="empty">Loading...</div>';
+  if (S.acct) await syncNow();
   const list = await loadBoard();
   if (route !== 'board') return;
   if (!list) { main.innerHTML = '<h2>Wen Lambo</h2><div class="empty">Could not reach the leaderboard. Try again in a minute.</div>'; return; }
-  const mine = list.findIndex(x => x.id === S.id);
-  main.innerHTML = `<h2>Wen Lambo</h2><div class="gray" style="margin-bottom:var(--b)">${mine >= 0 ? `You are number ${mine + 1}.` : 'You are not in the top 50 yet.'}</div>
-  <table class="bd"><thead><tr><th>#</th><th>Player</th><th>Net worth</th><th>Status</th></tr></thead><tbody>${list.map((x, i) => `<tr class="${x.id === S.id ? 'me' : ''}"><td>${i + 1}</td><td class="nmcell">${esc(x.name)}</td><td>${money(x.nw)}</td><td>${esc(ladder(x.nw / START - 1)[0])}</td></tr>`).join('')}</tbody></table>`;
+  const mine = S.acct ? list.findIndex(x => x.u === S.acct.u) : -1;
+  main.innerHTML = `<h2>Wen Lambo</h2>${S.acct ? `<div class="gray" style="margin-bottom:var(--b)">${mine >= 0 ? `You are number ${mine + 1}.` : 'You are not in the top 50 yet.'}</div>` : `<div class="note rowflex"><span>The board is for people with an account.</span><button id="openset">Make one</button></div>`}
+  ${list.length ? `<table class="bd"><thead><tr><th>#</th><th>Player</th><th>Net worth</th><th>Status</th></tr></thead><tbody>${list.map((x, i) => `<tr class="${S.acct && x.u === S.acct.u ? 'me' : ''}"><td>${i + 1}</td><td class="nmcell">${esc(x.u)}</td><td>${money(x.nw)}</td><td>${esc(ladder(x.nw / START - 1)[0])}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nobody yet. Be first.</div>'}`;
 }
 function render() {
   if (route === 'feed') vFeed(); else if (route === 'market') vMarket(); else if (route === 'co') vCompany(); else if (route === 'portfolio') vPortfolio(); else if (route === 'quests') vQuests(); else if (route === 'board') vBoard(); else { location.hash = '#feed'; }
@@ -445,9 +515,22 @@ function applyTheme() {
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = dark ? '#0c0d0b' : '#f3f0e7';
 }
+function accountHTML() {
+  if (S.acct) return `<div style="margin-bottom:var(--a)">Signed in as <b>${esc(S.acct.u)}</b>. Your portfolio is saved to your account and follows you to other devices.</div>
+    ${lastCode ? `<div class="note"><div class="b">Your recovery code: ${esc(lastCode)}</div>Write it down. It is the only way to reset a forgotten password, and it is not shown again.</div>` : ''}
+    <div class="row-btns"><button id="signout">Sign out</button><button class="stop" id="delacct">Delete account</button></div><div class="gray" id="accmsg" style="margin-top:var(--a)">${esc(accMsg)}</div>`;
+  const rec = accMode === 'rec';
+  return `<div class="gray" style="margin-bottom:var(--a)">Optional. An account puts you on the Wen Lambo leaderboard and saves your portfolio across devices.</div>
+    <div class="acc"><input id="au" maxlength="16" placeholder="Username" autocomplete="username" autocapitalize="off" spellcheck="false">
+    ${rec ? '<input id="ac" maxlength="12" placeholder="Recovery code" autocomplete="off" autocapitalize="off" spellcheck="false">' : ''}
+    <input id="ap" type="password" maxlength="64" placeholder="${rec ? 'New password' : 'Password'}" autocomplete="${rec ? 'new-password' : 'current-password'}"></div>
+    <div class="row-btns">${rec ? '<button class="go" data-acc="rec">Reset password</button><button data-acc-mode="in">Back</button>' : '<button class="go" data-acc="in">Sign in</button><button data-acc="up">Create account</button><button data-acc-mode="rec">Forgot</button>'}</div>
+    <div class="gray" id="accmsg" style="margin-top:var(--a)">${esc(accMsg)}</div>`;
+}
 function settingsHTML() {
   return `<div class="set-in"><div class="set-top"><h2>Settings</h2><button id="closeset">Close</button></div>
-  <h3>Name</h3><form class="nm-edit" id="nmform"><input id="nmin" maxlength="16" value="${esc(S.name)}" autocomplete="off"><button class="go">Save</button></form>
+  <h3>Account</h3>${accountHTML()}
+  ${S.acct ? '' : `<h3>Name</h3><form class="nm-edit" id="nmform"><input id="nmin" maxlength="16" value="${esc(S.name)}" autocomplete="off"><button class="go">Save</button></form>`}
   <h3>Theme</h3><div class="row-btns">${['dark', 'light', 'system'].map(t => `<button data-theme="${t}" class="${(S.theme || 'dark') === t ? 'on' : ''}">${t}</button>`).join('')}</div>
   <h3>Alerts</h3><div class="gray" style="margin-bottom:var(--a)">A notification when news hits something you own. Works while the game is open in a tab.</div>
   <button id="alerts" class="${S.notify ? 'go' : ''}">Alerts ${S.notify ? 'on' : 'off'}</button>
@@ -459,14 +542,14 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSetting
 function renderTape() {
   if (!W || !M) return;
   const all = W.companies.slice().sort((a, b) => chg24(b.t) - chg24(a.t)), pick = all.slice(0, 14).concat(all.slice(-14)).concat(W.indices);
-  const html = pick.map(c => { const ch = chg24(c.t); return `<span>${c.t} <span data-px="${c.t}">${num(shown(c.t))}</span> <span data-chg="${c.t}" class="${cls(ch)}">${arrow(ch)}${Math.abs(ch * 100).toFixed(2)}%</span></span>`; }).join('');
+  const html = pick.map(c => { const ch = chg24(c.t); return `<a href="#co/${c.t}">${c.t} <span data-px="${c.t}">${num(shown(c.t))}</span> <span data-chg="${c.t}" class="${cls(ch)}">${arrow(ch)}${Math.abs(ch * 100).toFixed(2)}%</span></a>`; }).join('');
   const tin = $('#tapein'); if (tin.dataset.k !== String(M.t)) { tin.innerHTML = html + html; tin.dataset.k = String(M.t); }
 }
 
 /* ---------- events ---------- */
 document.addEventListener('click', e => {
   const t = e.target;
-  const go = t.closest('[data-go]'); if (go && !t.closest('a')) { location.hash = '#' + go.dataset.go; return; }
+  const go = t.closest('[data-go]'); if (go && !t.closest('a') && !t.closest('button')) { location.hash = '#' + go.dataset.go; return; }
   const ev = t.closest('.ev');
   const b = t.closest('button');
   if (b) {
@@ -481,12 +564,23 @@ document.addEventListener('click', e => {
     }
     if (b.dataset.range) { rangeSel = b.dataset.range; document.querySelectorAll('.ranges button').forEach(x => x.classList.toggle('on', x === b)); drawChart(arg); return; }
     if (b.dataset.side) {
-      const v = parseFloat(($('#amt').value || '').replace(/[$,]/g, '')); const m = trade(arg, b.dataset.side, v);
-      $('#tmsg').textContent = m || (b.dataset.side === 'buy' ? 'Bought.' : 'Sold.'); $('#tmsg').className = 'msg ' + (m ? 'down' : 'up'); if (!m) { $('#amt').value = ''; refreshTrade(); renderMe(); } return;
+      if (pending) return;
+      const amtEl = $('#amt'), v = parseFloat((amtEl.value || '').replace(/[$,]/g, '')), side = b.dataset.side, all = side === 'sell' && amtEl.dataset.all === '1', t0 = arg, msg = $('#tmsg');
+      if (!(v > 0)) { msg.textContent = 'Enter an amount.'; msg.className = 'msg down'; return; }
+      holdOrder(msg, '#confirm,.mode,[data-pc]');
+      setTimeout(() => {
+        const m = trade(t0, side, v, all); pending = false; renderMe();
+        if (route === 'co' && arg === t0) { vCompany(); const e = $('#tmsg'); if (e) { e.textContent = m || (side === 'buy' ? 'Bought.' : 'Sold.'); e.className = 'msg ' + (m ? 'down' : 'up'); } }
+      }, ORDER_MS);
+      return;
     }
     if (b.dataset.oc !== undefined || b.dataset.oe || b.dataset.ok !== undefined || b.id === 'obuy') {
       if (b.dataset.oc !== undefined) opt.call = b.dataset.oc === '1'; if (b.dataset.oe) opt.exp = Number(b.dataset.oe); if (b.dataset.ok !== undefined) opt.k = Number(b.dataset.ok);
-      if (b.id === 'obuy') { const m = buyOption(arg); opt.qty = opt.qty; $('#optbox').innerHTML = optPanel(arg); const e = $('#omsg'); e.textContent = m || 'Bought. It will settle at expiry.'; e.className = 'msg ' + (m ? 'down' : 'up'); refreshTrade(); renderMe(); return; }
+      if (b.id === 'obuy') {
+        if (pending) return; const t0 = arg; holdOrder($('#omsg'), '#obuy,#optbox button');
+        setTimeout(() => { const m = buyOption(t0); pending = false; renderMe(); if (route === 'co' && arg === t0) { $('#optbox').innerHTML = optPanel(t0); const e = $('#omsg'); e.textContent = m || 'Bought. It will settle at expiry.'; e.className = 'msg ' + (m ? 'down' : 'up'); refreshTrade(); } }, ORDER_MS);
+        return;
+      }
       $('#optbox').innerHTML = optPanel(arg); return;
     }
     if (b.dataset.mode) {
@@ -497,10 +591,23 @@ document.addEventListener('click', e => {
     }
     if (b.dataset.pc) {
       const p = S.pos[arg], f = Number(b.dataset.pc) / 100;
-      $('#amt').value = (mode === 'sell' ? (p ? p.sh * shown(arg) * f : 0) : S.cash * f).toFixed(2); return;
+      const raw = mode === 'sell' ? (p ? p.sh * shown(arg) * f : 0) : S.cash * f, am = $('#amt');
+      am.value = (Math.floor(raw * 100) / 100).toFixed(2); am.dataset.all = b.dataset.pc === '100' ? '1' : ''; return;
     }
     if (b.dataset.claim) { const d = today(), q = quests().find(x => x.id === b.dataset.claim); if (q && q.ok && !q.claimed) { S.claimed[d + ':' + q.id] = true; S.tendies += q.r; save(); render(); } return; }
     if (b.id === 'alerts') { S.notify = !S.notify; if (S.notify && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission(); save(); if (!$('#settings').hidden) openSettings(); else render(); return; }
+    if (b.dataset.sort) { const cur = sortOf(arg.startsWith('list:')); S.sorts = S.sorts || {}; S.sorts[arg.startsWith('list:') ? 'list' : 'main'] = cur.k === b.dataset.sort && b.dataset.sort !== 'custom' ? { k: cur.k, d: -cur.d } : { k: b.dataset.sort, d: b.dataset.sort === 'name' || b.dataset.sort === 'custom' ? 1 : -1 }; save(); render(); return; }
+    if (b.dataset.star) { toggleStar(b.dataset.star); render(); return; }
+    if (b.dataset.mv) { const l = wls().find(x => x.id === arg.slice(5)); if (l) { const i = l.tks.indexOf(b.dataset.t), j = b.dataset.mv === 'up' ? i - 1 : i + 1; if (i >= 0 && j >= 0 && j < l.tks.length) { [l.tks[i], l.tks[j]] = [l.tks[j], l.tks[i]]; save(); render(); } } return; }
+    if (b.dataset.wlrm) { const l = wls().find(x => x.id === b.dataset.wlrm); if (l) { l.tks = l.tks.filter(x => x !== b.dataset.t); save(); render(); } return; }
+    if (b.dataset.wlt) { const l = wls().find(x => x.id === b.dataset.wlt); if (l) { l.tks = l.tks.includes(arg) ? l.tks.filter(x => x !== arg) : l.tks.concat([arg]); save(); b.classList.toggle('on'); } return; }
+    if (b.dataset.wlnew) { const n = `List ${wls().length + 1}`, l = newList(n); if (l) { l.tks.push(b.dataset.wlnew); save(); vCompany(); } return; }
+    if (b.dataset.wlren) { const l = wls().find(x => x.id === b.dataset.wlren); if (l) { b.outerHTML = `<form id="renform" data-id="${l.id}" class="nm-edit" style="margin:0"><input id="renin" maxlength="24" value="${esc(l.name)}" autocomplete="off"><button class="go">Save</button></form>`; $('#renin').focus(); } return; }
+    if (b.dataset.wldel) { if (b.dataset.sure) { S.lists = wls().filter(x => x.id !== b.dataset.wldel); save(); location.hash = '#market'; } else { b.dataset.sure = '1'; b.textContent = 'Really? Click again'; } return; }
+    if (b.dataset.acc) { accountAction(b.dataset.acc); return; }
+    if (b.dataset.accMode) { accMode = b.dataset.accMode; accMsg = ''; openSettings(); return; }
+    if (b.id === 'signout') { signOut(); return; }
+    if (b.id === 'delacct') { if (b.dataset.sure) deleteAccount(); else { b.dataset.sure = '1'; b.textContent = 'Really? Click again'; } return; }
     if (b.id === 'openset') { openSettings(); return; }
     if (b.id === 'closeset') { closeSettings(); return; }
     if (b.dataset.theme) { S.theme = b.dataset.theme; save(); applyTheme(); openSettings(); return; }
@@ -508,15 +615,27 @@ document.addEventListener('click', e => {
     return;
   }
   if (ev && !t.closest('a')) {
-    ev.classList.toggle('open');
-    if (ev.classList.contains('open')) { const d = today(); S.read[d] = (S.read[d] || 0) + 1; save(); }
+    const d = today();
+    if (ev.dataset.url) { window.open(ev.dataset.url, '_blank', 'noopener,noreferrer'); S.read[d] = (S.read[d] || 0) + 1; save(); }
+    else { ev.classList.toggle('open'); if (ev.classList.contains('open')) { S.read[d] = (S.read[d] || 0) + 1; save(); } }
   }
 });
 document.addEventListener('input', e => {
+  if (e.target.id === 'amt') e.target.dataset.all = '';
   if (e.target.id === 'oqty') { opt.qty = Number(e.target.value) || 0; const q = optQuote(arg); $('#ocost').textContent = money(q.cost); return; }
   if (e.target.id === 'q') { search = e.target.value; vMarket(); }
 });
+let dragT = null;
+document.addEventListener('dragstart', e => { const r = e.target.closest && e.target.closest('tr[data-dt]'); if (r) { dragT = r.dataset.dt; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragT); } });
+document.addEventListener('dragover', e => { if (dragT && e.target.closest && e.target.closest('tr[data-dt]')) e.preventDefault(); });
+document.addEventListener('drop', e => {
+  const r = e.target.closest && e.target.closest('tr[data-dt]'); if (!dragT || !r) return; e.preventDefault();
+  const l = wls().find(x => x.id === arg.slice(5)); if (l && dragT !== r.dataset.dt) { moveTk(l, dragT, r.dataset.dt); save(); render(); } dragT = null;
+});
 document.addEventListener('submit', e => {
+  if (e.target.id === 'newlistform') { e.preventDefault(); const l = newList($('#newlistin').value); if (l) location.hash = '#market/list:' + l.id; return; }
+  if (e.target.id === 'wladdform') { e.preventDefault(); const t = $('#wladd').value.trim().toUpperCase(), l = wls().find(x => x.id === arg.slice(5)); if (l && co[t] && !l.tks.includes(t)) { l.tks.push(t); save(); render(); } return; }
+  if (e.target.id === 'renform') { e.preventDefault(); const l = wls().find(x => x.id === e.target.dataset.id), n = $('#renin').value.replace(/[<>]/g, '').trim().slice(0, 24); if (l && n) { l.name = n; save(); } render(); return; }
   if (e.target.id === 'nmform') { e.preventDefault(); const n = $('#nmin').value.replace(/[^A-Za-z0-9 _.-]/g, '').trim().slice(0, 16); if (n.length >= 2) { S.name = n; save(); submitBoard(true); } renderMe(); closeSettings(); }
 });
 function refreshTrade() { const p = S.pos[arg]; const c = $('#tcash'); if (c) c.textContent = money(S.cash); const o = $('#town'); if (o) o.textContent = p ? num(p.sh, 4) + ' shares' : 'none'; }
@@ -548,12 +667,14 @@ async function boot() {
   setRoute();
   await Promise.all([loadWorld(), loadLive()]);
   if (!M || !W) { main.innerHTML = '<div class="empty">Could not load the market. Check your connection and refresh.</div>'; return; }
+  if (S.pos.TWLN) { S.pos.DOUG = S.pos.TWLN; delete S.pos.TWLN; }
+  (S.opts || []).forEach(o => { if (o.tk === 'TWLN') o.tk = 'DOUG'; });
   S.seenEv = S.seenEv || Math.max(0, ...(E ? E.events.map(e => e.t) : [0]));
   applyTheme(); award(); render(); tick(); submitBoard();
   setInterval(tick, 1000);
   setInterval(async () => { const before = M && M.t; await loadLive(); if (M && M.t !== before) { if (route === 'feed' || route === 'market') render(); award(); renderTape(); } }, 60000);
   document.addEventListener('visibilitychange', () => { if (document.hidden) snapshot(); else loadLive().then(() => { render(); }); });
-  window.addEventListener('pagehide', snapshot);
+  window.addEventListener('pagehide', () => { snapshot(); syncNow(); });
   setInterval(() => { if (!document.hidden) snapshot(); }, 30000);
 }
 boot();
