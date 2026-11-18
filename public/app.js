@@ -2,7 +2,7 @@
 const LOCAL = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
 const REPO = 'yuzhe-chen/stonks';
 const LIVE = LOCAL ? ['/data/'] : [`https://raw.githubusercontent.com/${REPO}/data/`, `https://cdn.jsdelivr.net/gh/${REPO}@data/`];
-const COLD = LOCAL ? ['/data/'] : [`https://cdn.jsdelivr.net/gh/${REPO}@data/`, `https://raw.githubusercontent.com/${REPO}/data/`];
+const COLD = LIVE;                                  // the CDN keeps branch files for 12 hours, so it is only the fallback
 const BOARD = { project: '', key: '' };           // filled in when the leaderboard backend exists
 const START = 10000, TIP_COST = 40;
 
