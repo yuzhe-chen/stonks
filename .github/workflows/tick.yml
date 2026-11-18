@@ -25,13 +25,12 @@ jobs:
           if git rev-parse --verify origin/data >/dev/null 2>&1; then git archive origin/data | tar -x -C data; fi
       - name: Pause switch
         run: |
-          if [ -f pause.txt ]; then echo "paused"; echo "PAUSED=1" >> "$GITHUB_ENV"; fi
+          if [ -f pause.txt ]; then echo "PAUSED=1" >> "$GITHUB_ENV"; fi
       - name: Tick
         if: env.PAUSED != '1'
         run: node scripts/tick.mjs data
-        env:
-          NO_NET: ${{ env.PAUSED == '1' && '1' || '' }}
       - name: Publish the data branch (one commit, history is not kept)
+        if: env.PAUSED != '1'
         run: |
           cd data
           rm -rf .git
