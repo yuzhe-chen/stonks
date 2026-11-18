@@ -4,11 +4,11 @@ cd "$(dirname "$0")"
 node -e '
 const fs=require("fs");
 const m=JSON.parse(fs.readFileSync("appsscript.json","utf8")),bad=[];
-if(JSON.stringify(m.oauthScopes||null)!=="[]")bad.push("oauthScopes must be an empty list");
+if(JSON.stringify(m.oauthScopes||null)!==JSON.stringify(["https://www.googleapis.com/auth/spreadsheets"]))bad.push("oauthScopes must be exactly the Sheets scope");
 if(!m.webapp||m.webapp.executeAs!=="USER_DEPLOYING"||m.webapp.access!=="ANYONE_ANONYMOUS")bad.push("webapp must run as the owner for anyone");
 if(m.dependencies&&Object.keys(m.dependencies).length)bad.push("advanced services need scopes");
 const code=fs.readFileSync("Code.gs","utf8");
-const banned=/\b(UrlFetchApp|SpreadsheetApp|GmailApp|MailApp|DriveApp|DocumentApp|SlidesApp|FormApp|CalendarApp|ContactsApp|GroupsApp|ScriptApp|Session\.get(Active|Effective)User|AdminDirectory|YouTube|BigQuery)\b/g;
+const banned=/\b(UrlFetchApp|GmailApp|MailApp|DriveApp|DocumentApp|SlidesApp|FormApp|CalendarApp|ContactsApp|GroupsApp|ScriptApp|Session\.get(Active|Effective)User|AdminDirectory|YouTube|BigQuery)\b/g;
 const hits=[...new Set(code.match(banned)||[])];if(hits.length)bad.push("uses "+hits.join(", "));
 if(bad.length){console.error("REFUSING TO DEPLOY: "+bad.join("; "));process.exit(1);}' || exit 1
 CLASP=/Users/yixinlu/planner/appsscript/node_modules/.bin/clasp

@@ -1,17 +1,32 @@
 // Stonks accounts and the Wen Lambo leaderboard.
-// No Google permissions at all: data lives in script properties, nothing here needs a scope.
-// Passwords are salted and hashed, tokens are hashed, nothing readable is stored.
+// Accounts live in a Google Sheet (one row each), so there is no account limit. The owner approves the Sheets permission once;
+// visitors never see a permission screen. Passwords are salted and hashed, tokens are hashed, nothing readable is stored.
 const P = PropertiesService.getScriptProperties();
 const NAME_RE = /^[a-z0-9_]{3,16}$/;
-const MAX_ACCOUNTS = 400, MAX_SAVE = 3200, ITER = 300, LB_KEEP = 100;
+const MAX_SAVE = 30000, ITER = 300, LB_KEEP = 100;
 
 function out_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
 function hex_(b) { return b.map(x => ((x < 0 ? x + 256 : x)).toString(16).padStart(2, '0')).join(''); }
 function sha_(s) { return hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, s, Utilities.Charset.UTF_8)); }
 function slow_(salt, pw) { let h = salt + ':' + pw; for (let i = 0; i < ITER; i++) h = sha_(h + salt); return h; }
 function rand_(n) { return (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '').slice(0, n); }
-function getAcct_(u) { const v = P.getProperty('a:' + u); return v ? JSON.parse(v) : null; }
-function putAcct_(u, a) { P.setProperty('a:' + u, JSON.stringify(a)); }
+// run this once from the Apps Script editor: it makes the spreadsheet and approves the permission
+function setup() {
+  if (P.getProperty('ssid')) return 'already set up';
+  const ss = SpreadsheetApp.create('Stonks accounts'); ss.getSheets()[0].setName('a');
+  P.setProperty('ssid', ss.getId());
+  return ss.getUrl();
+}
+function sh_() { const id = P.getProperty('ssid'); if (!id) throw new Error('run setup first'); return SpreadsheetApp.openById(id).getSheetByName('a'); }
+function rowOf_(u) {
+  const sh = sh_(), c = CacheService.getScriptCache(), hit = Number(c.get('r:' + u) || 0);
+  if (hit && sh.getRange(hit, 1).getValue() === u) return hit;
+  const f = sh.getRange('A:A').createTextFinder(u).matchEntireCell(true).findNext();
+  if (!f) return 0; c.put('r:' + u, String(f.getRow()), 21600); return f.getRow();
+}
+function getAcct_(u) { const r = rowOf_(u); return r ? JSON.parse(sh_().getRange(r, 2).getValue()) : null; }
+function putAcct_(u, a) { const r = rowOf_(u), j = JSON.stringify(a); if (r) sh_().getRange(r, 2).setValue(j); else sh_().appendRow([u, j]); }
+function delAcct_(u) { const r = rowOf_(u); if (r) { sh_().deleteRow(r); CacheService.getScriptCache().remove('r:' + u); } }
 function lb_() { const v = P.getProperty('lb'); return v ? JSON.parse(v) : []; }
 function withLock_(f) { const l = LockService.getScriptLock(); l.waitLock(15000); try { return f(); } finally { l.releaseLock(); } }
 function num_(x, lo, hi) { x = Number(x); return isFinite(x) && x >= lo && x <= hi ? x : null; }
@@ -41,13 +56,12 @@ function handle_(o) {
     const p = String(o.p || ''); if (p.length < 6 || p.length > 64) return { error: 'password' };
     return withLock_(() => {
       if (getAcct_(u)) return { error: 'taken' };
-      const n = Number(P.getProperty('n') || 0); if (n >= MAX_ACCOUNTS) return { error: 'full' };
       const salt = rand_(16), code = rand_(12), rs = rand_(16);
       const a = { s: salt, h: slow_(salt, p), rs: rs, rh: slow_(rs, code), tk: [], nw: START_, tn: 0, ts: Date.now(), sv: '' };
       const t = newToken_(a);
       const nw = num_(o.nw, 0, 1e9); if (nw !== null) { a.nw = nw; a.tn = num_(o.tn, 0, 1e7) || 0; }
       if (typeof o.sv === 'string' && o.sv.length <= MAX_SAVE) a.sv = o.sv;
-      try { putAcct_(u, a); P.setProperty('n', String(n + 1)); setRow_(u, a.nw, a.tn); } catch (e) { return { error: 'full' }; }
+      putAcct_(u, a); setRow_(u, a.nw, a.tn);
       return { ok: true, token: t, code: code };
     });
   }
@@ -71,7 +85,7 @@ function handle_(o) {
       const a = authed_(u, o.t); if (!a) return { error: 'auth' };
       a.nw = nw; a.tn = Math.floor(tn); a.ts = Date.now();
       if (typeof o.sv === 'string') a.sv = o.sv.length <= MAX_SAVE ? o.sv : a.sv;
-      try { putAcct_(u, a); setRow_(u, nw, a.tn); } catch (e) { return { error: 'full' }; }
+      putAcct_(u, a); setRow_(u, nw, a.tn);
       return { ok: true };
     });
   }
@@ -80,7 +94,7 @@ function handle_(o) {
   if (op === 'delete') {
     return withLock_(() => {
       const a = authed_(u, o.t); if (!a) return { error: 'auth' };
-      P.deleteProperty('a:' + u); P.setProperty('n', String(Math.max(0, Number(P.getProperty('n') || 1) - 1)));
+      delAcct_(u);
       P.setProperty('lb', JSON.stringify(lb_().filter(r => r[0] !== u)));
       return { ok: true };
     });
