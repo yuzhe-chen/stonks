@@ -1,14 +1,16 @@
 /* The whole site: 2 fonts, 3 sizes, 2 text colors (cream, gray), 2 styles (regular, bold), 3 spacings (8, 16, 32).
    Lime and red are data colors for gains and losses. */
-:root{
+:root,:root[data-theme=dark]{
   --bg:#0c0d0b;--panel:#131410;--line:#2b2c26;
   --text:#ece9df;--gray:#8d8c80;
   --up:#c8f53a;--down:#ff5436;
   --s:14px;--m:24px;--l:56px;
   --a:8px;--b:16px;--c:32px;
   --head:'Big Shoulders Display','Arial Narrow','Helvetica Neue',sans-serif;
-  --mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
+  --mono:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
 }
+
+:root[data-theme=light]{--bg:#f3f0e7;--panel:#e8e4d6;--line:#cdc8b8;--text:#17180f;--gray:#6b6a5e;--up:#2f7d00;--down:#d02a0b}
 *{box-sizing:border-box;margin:0;padding:0;font-style:normal}
 html{background:var(--bg);overscroll-behavior:none}
 body{background:var(--bg);color:var(--text);font:400 var(--s)/1.5 var(--mono);min-height:100vh;overscroll-behavior:none;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
@@ -138,3 +140,40 @@ svg.sp{display:block;width:96px;height:28px}
 .bd td:first-child{width:48px;color:var(--gray)}
 .bd tr.me td{background:var(--panel);color:var(--up)}
 .bd td.nmcell{text-align:left}
+
+/* one-line headings */
+h2,h3,.brand,.ladder,.huge,.px,.tabs a,.sec .n{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+@media (max-width:600px){:root{--l:40px}}
+
+/* the gap between the amount box and the buy / sell choice */
+.trade input{margin-bottom:var(--a)}
+.trade .row2 input{margin-bottom:0}
+.trade .quick button.on,.row-btns button.on{background:var(--text);color:var(--bg);border-color:var(--text)}
+.row-btns{display:flex;gap:var(--a)}
+
+/* notes (broke, debt, jail) */
+.note{border:1px solid var(--line);padding:var(--b);margin-bottom:var(--c)}
+.note a{text-decoration:underline;text-underline-offset:3px}
+
+/* settings panel */
+.settings{position:fixed;inset:0;background:var(--bg);z-index:20;overflow-y:auto;overscroll-behavior:none}
+.settings[hidden]{display:none}
+.set-in{max-width:640px;margin:0 auto;padding:var(--c) var(--b)}
+.set-top{display:flex;justify-content:space-between;align-items:center;gap:var(--b);margin-bottom:var(--b)}
+.set-top h2{margin:0}
+
+/* feed headlines stay on one line too; opening one shows all of it */
+.ev .hd{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ev.open .hd{white-space:normal}
+.ev>div:last-child{min-width:0}
+
+.tabs a{flex:none;overflow:visible;text-overflow:clip;max-width:none}
+.q .qt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.q>div:first-child{min-width:0}
+@media (max-width:600px){
+  .ev{grid-template-columns:1fr;gap:var(--a)}
+  .ev .tm{display:flex;gap:var(--b)}
+  .ev .tag{margin-top:0}
+  .ev .hd{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .ev.open .hd{display:block}
+}
