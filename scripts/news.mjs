@@ -14,7 +14,7 @@ export const FEEDS = [
 
 // sign: +1 moves with the headline's mood, -1 against it. first listed sector is the primary one.
 export const RULES = [
-  { w: /\b(chip|chips|semiconductor|nvidia|tsmc|intel|processor|microchip|wafer)\w*/i, fx: [['chips', 1], ['gadget', 0.3], ['ai', 0.4]] },
+  { w: /\b(?:chips?|semiconductors?|nvidia|tsmc|intel|processors?|microchips?|wafers?)\b/i, fx: [['chips', 1], ['gadget', 0.3], ['ai', 0.4]] },
   { w: /\b(software|saas|cybersecurity|hack(?:ed|ers?)?|data breach|microsoft|oracle|salesforce|cloud)\b/i, fx: [['soft', 1]] },
   { w: /\b(ai|a\.i\.|openai|chatbot|artificial intelligence|generative|anthropic|large language|gemini|chatgpt)\b/i, fx: [['ai', 1], ['chips', 0.5], ['soft', 0.3]] },
   { w: /\b(facebook|meta|instagram|tiktok|social media|snapchat|twitter|youtube|influencer|x corp|teen\w* online)\b/i, fx: [['social', 1], ['media', 0.2]] },
@@ -24,11 +24,11 @@ export const RULES = [
   { w: /\b(solar|wind farm|wind power|renewable|clean energy|battery|climate|emissions|net zero|heat ?wave)\b/i, fx: [['green', 1], ['oil', -0.3]] },
   { w: /\b(airline|boeing|airbus|flight\w*|airport|air travel|tourism|travel|faa|cruise|holiday travel)\b/i, fx: [['air', 1]] },
   { w: /\b(shipping|port|freight|supply chain|container|suez|cargo|tariff\w*|trade war|logistics|strike at)\b/i, fx: [['ship', 1], ['retail', -0.3]] },
-  { w: /\b(bank|banks|banking|lender|lending|jpmorgan|goldman|credit|loan\w*|fed|federal reserve|interest rate\w*|mortgage rate\w*)\b/i, fx: [['bank', 1], ['home', 0.4]] },
+  { w: /\b(bank|banks|banking|lender|lending|jpmorgan|goldman|credit|loan\w*|the fed|fed (?:chair|rates?|cuts?|hikes?|meeting|minutes|officials?)|federal reserve|interest rate\w*|mortgage rate\w*)\b/i, fx: [['bank', 1], ['home', 0.4]] },
   { w: /\b(bitcoin|crypto\w*|ethereum|blockchain|stablecoin|token|coinbase|binance)\b/i, fx: [['crypto', 1]] },
   { w: /\b(insurance|insurer\w*|claims?|hurricane|wildfire|flood\w*|earthquake|storm|tornado|disaster)\b/i, fx: [['insure', -1], ['home', -0.4]] },
   { w: /\b(housing|home prices?|real estate|mortgage|rent|landlord|homebuyer\w*|property market)\b/i, fx: [['home', 1], ['bank', 0.2]] },
-  { w: /\b(fda|drug\w*|vaccine\w*|pharma\w*|biotech|clinical trial|cancer|medicine|obesity|ozempic|health)\b/i, fx: [['pharma', 1]] },
+  { w: /\b(fda|drug\w*|vaccine\w*|pharma\w*|biotech|clinical trial|medicine|obesity|ozempic)\b/i, fx: [['pharma', 1]] },
   { w: /\b(food|grocer\w*|crop\w*|harvest|wheat|corn|coffee|cocoa|egg\w*|beef|farm\w*|restaurant\w*|snack\w*|inflation)\b/i, fx: [['food', 1], ['retail', 0.2]] },
   { w: /\b(retail\w*|amazon|walmart|target|shoppers?|consumer spending|holiday sales|black friday|e-commerce|store closures?)\b/i, fx: [['retail', 1], ['ship', 0.3]] },
   { w: /\b(netflix|disney|streaming|box office|hollywood|video game\w*|gaming|nintendo|sony|spotify|film|studio)\b/i, fx: [['media', 1]] },
@@ -60,7 +60,10 @@ export async function fetchFeed(src, url) {
   } catch (e) { return []; }
 }
 // -> { fx: {sector: signedMove}, primary, mood } or null when nothing in the world cares
+// phrases that contain a keyword but are about something else (a place, a tax, a crime): taken out before matching
+const NOISE = /\b(?:west bank|gaza strip|national insurance|river ?banks?|food banks?|blood banks?|bank holidays?|health ministry|ministry of health|drugs? (?:trade|trafficking|cartels?|smuggling|gangs?|lords?|busts?|dealers?)|illegal drugs?|war on drugs)\b/gi;
 export function classify(title, tie = 1) {
+  title = title.replace(NOISE, ' ');
   const up = (title.match(new RegExp(UP.source, 'gi')) || []).length, dn = (title.match(new RegExp(DOWN.source, 'gi')) || []).length;
   const strong = STRONG.test(title);
   let mood = up === dn ? 0 : (up > dn ? 1 : -1);

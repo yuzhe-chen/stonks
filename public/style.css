@@ -221,3 +221,29 @@ tr[draggable=true]{cursor:grab}
 .set-in .nm-edit{justify-content:flex-start}
 td:first-child,th:first-child{padding-left:0}
 td:last-child,th:last-child{padding-right:0}
+
+/* ---- tendies, quests, no-source page ---- */
+.me .tn{margin-top:var(--a);color:var(--gray)}
+.me .tn b{color:var(--text);font-size:var(--m);font-family:var(--head);text-transform:uppercase}
+.qhead{display:flex;justify-content:space-between;gap:var(--b);color:var(--gray);text-transform:uppercase;letter-spacing:.08em;padding-bottom:var(--a)}
+.lvln{font-family:var(--head);font-weight:700;font-size:var(--l);line-height:1}
+.lvlt{font-family:var(--head);font-weight:700;font-size:var(--m);text-transform:uppercase;line-height:1}
+.lvltn{text-align:right}
+.lvlbar{display:flex;align-items:center;gap:var(--b);margin-top:var(--b)}
+.lvlbar .meter{flex:1;margin:0;height:var(--b);max-width:none;border-radius:var(--r)}
+.lvlbar .meter i{border-radius:var(--r)}
+.lvllbl{display:flex;justify-content:space-between;color:var(--gray);margin-top:var(--a)}
+.lvllbl b{color:var(--text)}
+.titles{display:flex;flex-wrap:wrap;gap:var(--a);margin-top:var(--b)}
+.titles span{border:1px solid var(--line);border-radius:var(--r);padding:0 var(--a);line-height:28px;color:var(--gray)}
+.titles .past{color:var(--text)}
+.titles .now{border-color:var(--up);color:var(--up);font-weight:700}
+.btnlink{display:inline-block;border:1px solid var(--line);border-radius:var(--rb);padding:var(--a) var(--b);text-transform:uppercase;font-weight:700;letter-spacing:.06em}
+.btnlink:hover{border-color:var(--text)}
+.why{font-family:var(--head);font-weight:700;font-size:var(--l);line-height:1;text-transform:uppercase;margin-bottom:var(--c)}
+.why>div{margin-bottom:var(--a);white-space:normal}
+table.chk td{padding:var(--a) 0}table.chk td:last-child{text-align:right}
+.lead{max-width:640px}
+.ev[data-nosrc] .hd:hover{text-decoration:underline;text-underline-offset:4px}
+input[list]::-webkit-calendar-picker-indicator{display:none !important;opacity:0}
+input[list]{appearance:none}

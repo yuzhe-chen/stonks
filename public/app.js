@@ -4,7 +4,7 @@ const REPO = 'yuzhe-chen/stonks';
 const LIVE = LOCAL ? ['/data/'] : [`https://raw.githubusercontent.com/${REPO}/data/`, `https://cdn.jsdelivr.net/gh/${REPO}@data/`];
 const COLD = LIVE;                                  // the CDN keeps branch files for 12 hours, so it is only the fallback
 const API = 'https://script.google.com/macros/s/AKfycbxYXFH6l7MikjO7xmTkDmKI95gPTzgykEAP8duVJvC9BEqBT5yaw5fhJU27R3Kl5a73/exec';   // accounts and the leaderboard (Apps Script, no Google permissions)
-const START = 10000, TIP_COST = 40;
+const START = 10000, TIP_COST = 40, LAWYER = 60, BAIL = 150;
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -23,7 +23,7 @@ const NAMES = ['Probably', 'Definitely', 'Mostly', 'Allegedly', 'Totally', 'Bare
 function fresh() {
   const rid = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, '0')).join('');
   return { id: rid, name: NAMES[Math.random() * 8 | 0] + NAMES2[Math.random() * 8 | 0] + (10 + Math.random() * 89 | 0), cash: START, dep: START, pos: {}, trades: [], tendies: 0,
-    claimed: {}, brrr: {}, badges: {}, read: {}, tips: {}, notify: false, seen: 0, last: null, peak: START, fines: 0, sells: {}, theme: 'dark', opts: [], optLog: [], jailUntil: 0, donated: 0 };
+    claimed: {}, brrr: {}, badges: {}, read: {}, tips: {}, notify: false, seen: 0, last: null, peak: START, fines: 0, sells: {}, theme: 'dark', opts: [], optLog: [], jailUntil: 0, donated: 0, lawyers: 0 };
 }
 let S;
 try { S = Object.assign(fresh(), JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) { S = fresh(); }
@@ -185,7 +185,7 @@ async function api(body) {
   try { const r = await fetch(API, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: JSON.stringify(body) }); return await r.json(); }
   catch (e) { return { error: 'net' }; }
 }
-const SYNC_KEYS = ['cash', 'dep', 'pos', 'tendies', 'claimed', 'brrr', 'badges', 'read', 'tips', 'sells', 'peak', 'fines', 'opts', 'optLog', 'jailUntil', 'donated', 'lists', 'sorts'];
+const SYNC_KEYS = ['cash', 'dep', 'pos', 'tendies', 'claimed', 'brrr', 'badges', 'read', 'tips', 'sells', 'peak', 'fines', 'opts', 'optLog', 'jailUntil', 'donated', 'lawyers', 'lists', 'sorts'];
 const b64 = u8 => btoa(String.fromCharCode(...u8)), unb64 = t => Uint8Array.from(atob(t), c => c.charCodeAt(0));
 async function packSave() {
   const o = {}; SYNC_KEYS.forEach(k => { o[k] = S[k]; });
@@ -283,7 +283,7 @@ function chips(ev) {
 function evHTML(ev) {
   const tag = ev.kind === 'real' ? 'Real news' : ev.kind === 'wild' ? 'Wild' : ev.kind === 'brrr' ? 'Brrr' : ev.label || 'Scheduled';
   const brrrOK = ev.kind === 'brrr' && !S.brrr[ev.id] && Date.now() - ev.t < 24 * 3600e3;
-  return `<div class="ev${ev.url && /^https?:\/\//.test(ev.url) ? ' link' : ''}" data-id="${esc(ev.id)}" ${ev.url && /^https?:\/\//.test(ev.url) ? `data-url="${esc(ev.url)}"` : ''}><div class="tm">${ago(ev.t)}<span class="tag ${ev.kind === 'brrr' ? 'up' : ''}">${esc(tag)}</span></div>
+  return `<div class="ev${ev.url && /^https?:\/\//.test(ev.url) ? ' link' : ''}" data-id="${esc(ev.id)}" ${ev.url && /^https?:\/\//.test(ev.url) ? `data-url="${esc(ev.url)}"` : ev.kind !== 'real' ? `data-nosrc="${esc(ev.id)}"` : ''}><div class="tm">${ago(ev.t)}<span class="tag ${ev.kind === 'brrr' ? 'up' : ''}">${esc(tag)}</span></div>
     <div><div class="hd">${esc(ev.head)}</div><div class="dk">${esc(ev.dek || '')}</div>
     <div class="chips">${chips(ev)}</div>
     ${brrrOK ? `<div class="chips"><button class="go" data-brrr="${esc(ev.id)}" data-amt="${ev.amt}">Claim ${money(ev.amt, 0)}</button></div>` : ev.kind === 'brrr' && S.brrr[ev.id] ? '<div class="dk">Claimed.</div>' : ''}
@@ -301,12 +301,10 @@ function awayHTML() {
 function upcomingHTML() {
   const up = (E && E.upcoming || []).filter(u => u.at > Date.now()).slice(0, 3);
   if (!up.length) return '';
-  return `<h3>Coming up</h3>` + up.map(u => {
-    const tip = S.tips[u.id];
-    let hint = '';
-    if (tip) hint = `<div class="b ${tip === 'u' ? 'up' : 'down'}">Your tip says ${tip === 'u' ? 'up' : 'down'}. Probably.</div>`;
-    return `<div class="q ${''}"><div><div class="qt">${esc(u.label)}</div><div class="qd">in <span data-cd="${u.at}">${countdown(u.at - Date.now())}</span>${tip ? '' : `. A tip costs ${TIP_COST} tendies.`}</div>${hint}</div>
-      ${tip ? '' : `<button data-tip="${esc(u.id)}" ${S.tendies < TIP_COST ? 'disabled' : ''}>Insider tip</button>`}</div>`;
+  return `<h3>Coming up</h3><div class="qhead"><span>Event</span><span>Insider tip</span></div>` + up.map(u => {
+    const tip = S.tips[u.id], can = S.tendies >= TIP_COST;
+    return `<div class="q"><div><div class="qt">${esc(u.label)}</div><div class="qd">in <b data-cd="${u.at}">${countdown(u.at - Date.now())}</b></div></div>
+      ${tip ? `<b class="${tip === 'u' ? 'up' : 'down'}">${tip === 'u' ? '\u25B2 Up' : '\u25BC Down'}, probably</b>` : `<button data-tip="${esc(u.id)}" ${can ? '' : 'disabled'}>${can ? TIP_COST + ' tendies' : 'Needs ' + TIP_COST}</button>`}</div>`;
   }).join('') + `<div class="gray" id="tipmsg"></div>`;
 }
 function vFeed() {
@@ -349,12 +347,12 @@ function vMarket() {
     main.innerHTML = `<div class="crumb"><a href="#market">Market</a> / ${esc(l.name)}</div><h2>${esc(l.name)}</h2>
       <form class="tools" id="wladdform"><input id="wladd" list="allco" placeholder="Add a ticker" autocomplete="off" autocapitalize="characters"><button>Add</button></form>
       <datalist id="allco">${W.companies.concat(W.indices).map(c => `<option value="${c.t}">${esc(c.n)}</option>`).join('')}</datalist>
-      ${items.length ? rowsHTML(items, { list: l.id }) : '<div class="empty">Empty. Tap a star on any stock, or add a ticker above.</div>'}
+      ${items.length ? rowsHTML(items, { list: l.id }) : '<div class="empty">Nothing here yet.</div>'}
       <div class="row-btns" style="margin-top:var(--c)"><button data-wlren="${l.id}">Rename</button><button class="stop" data-wldel="${l.id}">Delete list</button></div>`;
     return;
   }
   if (arg === 'all') { main.innerHTML = `<div class="crumb"><a href="#market">Market</a> / All stocks</div><h2>All stocks</h2>${rowsHTML(W.companies)}`; return; }
-  if (arg === 'pennies') { const l = W.companies.filter(c => shown(c.t) < 10); main.innerHTML = `<div class="crumb"><a href="#market">Market</a> / Penny stocks</div><h2>Penny stocks</h2><div class="gray" style="margin-bottom:var(--b)">Everything under $10. Cheap to buy, wild to hold.</div>${rowsHTML(l)}`; return; }
+  if (arg === 'pennies') { const l = W.companies.filter(c => shown(c.t) < 10); main.innerHTML = `<div class="crumb"><a href="#market">Market</a> / Penny stocks</div><h2>Penny stocks</h2>${rowsHTML(l)}`; return; }
   if (arg === 'index') { main.innerHTML = `<div class="crumb"><a href="#market">Market</a> / Index funds</div><h2>Index funds</h2>${rowsHTML(W.indices)}`; return; }
   if (arg && !secName[arg]) arg = '';
   if (arg) { main.innerHTML = `<div class="crumb"><a href="#market">Market</a> / ${esc(secName[arg])}</div><h2>${esc(secName[arg])}</h2>${rowsHTML(W.companies.filter(c => c.s === arg))}`; return; }
@@ -414,10 +412,10 @@ function optPanel(t) {
   <div class="quick">${STEPS.map((x, i) => `<button data-ok="${i}" class="${opt.k === i ? 'on' : ''}">${x === 0 ? 'At' : (x > 0 ? '+' : '') + x * 100}</button>`).join('')}</div>
   <div class="row2" style="margin-top:var(--b)"><span>Strike</span><span class="b" id="ostrike">${num(q.K)}</span></div>
   <div class="row2"><span>Contracts of 100</span><input id="oqty" inputmode="numeric" value="${opt.qty}" style="width:96px;text-align:right" autocomplete="off"></div>
-  <div class="row2"><span>Cost</span><span class="b" id="ocost">${money(q.cost)}</span></div>
+  <div class="row2"><span>Breakeven</span><b id="obe">${num(opt.call ? q.K + q.ask : q.K - q.ask)}</b></div>
+  <div class="row2"><span>Cost</span><b id="ocost">${money(q.cost)}</b></div>
   <div class="btns" style="grid-template-columns:1fr"><button id="obuy" class="${opt.call ? 'go' : 'stop'}">Buy ${opt.call ? 'call' : 'put'}</button></div>
-  <div class="msg" id="omsg"></div>
-  <div class="gray">Worthless at expiry unless it ends past the strike. Buy more than you can pay for and you owe the difference.</div>`;
+  <div class="msg" id="omsg"></div>`;
 }
 function buyOption(t) {
   if (inJail()) return 'You are in jail. Trading is not allowed.';
@@ -447,12 +445,11 @@ async function drawChart(t) {
   svg.addEventListener('pointerleave', () => { const vl = $('#vl'); if (vl) vl.setAttribute('visibility', 'hidden'); $('#hov').innerHTML = `<span class="${cls(span)}">${rangeSel}: ${pct(span)}</span>`; });
 }
 function statusBanner() {
-  if (inJail()) return `<div class="note"><div class="b">You are in jail</div>Options fraud, apparently. Release in <span data-cd="${S.jailUntil}">${countdown(S.jailUntil - Date.now())}</span>. Your assets were seized and the debt is forgiven. The commissary takes cash only.</div>`;
-  if (S.cash < 0) return `<div class="note"><div class="b down">You are in debt: ${money(S.cash)}</div>Interest is 5% a day. Past -$2,000 the court takes your assets and you go to jail.</div>`;
+  if (inJail()) return `<div class="note rowflex"><div><div class="b">Jail</div>Release in <b data-cd="${S.jailUntil}">${countdown(S.jailUntil - Date.now())}</b>. Assets seized, debt cleared.</div><button id="bail" ${S.tendies >= BAIL ? '' : 'disabled'}>${S.tendies >= BAIL ? 'Bail ' + BAIL + ' tendies' : 'Bail needs ' + BAIL}</button></div>`;
+  if (S.cash < 0) return `<div class="note"><div class="b down">Debt ${money(S.cash)}</div>Interest <b>5%</b> a day. Jail at <b>-$2,000</b>.</div>`;
   if (broke()) {
     const can = Date.now() - (S.donated || 0) >= 3600e3 && netWorth() < 25;
-    return `<div class="note"><div class="b">You are broke</div>${can ? 'A kind stranger wants to donate $100.' : 'Penny stocks are all you can afford.'} <a href="#market/pennies">See the penny stocks</a>, mostly pharma. Tiny prices, huge swings.
-    ${can ? '<div class="chips"><button class="go" id="donate">Accept the donation</button></div>' : ''}</div>`;
+    return `<div class="note rowflex"><div><div class="b">Broke</div>${can ? 'A kind stranger donates <b>$100</b>.' : 'Only penny stocks are in reach.'}</div><div class="row-btns">${can ? '<button class="go" id="donate">Accept $100</button>' : ''}<a class="btnlink" href="#market/pennies">Penny stocks</a></div></div>`;
   }
   return '';
 }
@@ -480,16 +477,51 @@ function vPortfolio() {
   ${S.fines ? `<div class="gray" style="margin-top:var(--b)">Fined by the SEC so far: ${money(S.fines)}.</div>` : ''}
   ${optionsPortfolioHTML()}`;
 }
-const BADGE_INFO = { jail: 'Went to jail over options debt.', rekt: 'Fell 25% below your starting money.', bigbig: 'Reached 15% above your starting money.', diamond: 'Held a stock through an 8% drop from one headline.',
-  brrr3: 'Claimed 3 Brrr handouts.', basket: 'Held stocks in 8 sectors at once.', martha: 'Got caught by the SEC.', tipster: 'Bought an insider tip.' };
+const BADGE_INFO = { jail: 'Go to jail over options debt.', rekt: 'Fall 25% below your starting money.', bigbig: 'Reach 15% above your starting money.', diamond: 'Hold a stock through an 8% drop from one headline.',
+  brrr3: 'Claim 3 Brrr handouts.', basket: 'Hold stocks in 8 sectors at once.', martha: 'Get caught by the SEC.', tipster: 'Buy an insider tip.' };
 function vQuests() {
-  const qs = quests(), lv = level(), cur = S.tendies, lo = lv * lv * 20, hi = (lv + 1) * (lv + 1) * 20;
+  const qs = quests(), lv = level(), cur = S.tendies, lo = lv * lv * 20, hi = (lv + 1) * (lv + 1) * 20, pc = Math.min(100, (cur - lo) / (hi - lo) * 100);
   main.innerHTML = `<h2>Quests</h2>
-  <div class="card lvlcard"><div class="lvl"><div class="t">${esc(title())}</div><div class="s">Level ${lv}, ${cur} tendies. ${hi - cur} more for the next title.</div></div><div class="meter"><i style="width:${Math.min(100, (cur - lo) / (hi - lo) * 100)}%"></i></div></div>
-  <h3>Today</h3><div class="cards">${qs.map(q => `<div class="card"><div class="card-h"><span class="qt">${esc(q.t)}</span><span class="reward">+${q.r}</span></div><div class="qd">${esc(q.d)}</div>
-    <div class="meter"><i style="width:${Math.round(q.pr * 100)}%"></i></div><div class="card-f"><span>${esc(q.p)}</span>${q.claimed ? '<span class="gray">Claimed</span>' : `<button class="${q.ok ? 'go' : ''}" data-claim="${q.id}" ${q.ok ? '' : 'disabled'}>Claim</button>`}</div></div>`).join('')}</div>
-  <h3>Badges</h3><div class="cards">${Object.keys(BADGES).map(k => { const got = !!S.badges[k]; return `<div class="card ${got ? 'got-' + BADGES[k][1] : ''}"><div class="card-h"><span class="qt">${BADGES[k][0]}</span><span class="gray">${got ? 'Earned' : 'Locked'}</span></div><div class="qd">${BADGE_INFO[k]}</div></div>`; }).join('')}</div>
-  <h3>Insider tips</h3><div class="card"><div class="qd">Scheduled events show up in the feed with a countdown. A tip costs ${TIP_COST} tendies and is right about 70 percent of the time. Each tip has a 1 in 4 chance of getting you noticed by the SEC.</div></div>`;
+  <div class="card lvlcard"><div class="rowflex"><div><div class="gray">Level</div><div class="lvln">${lv}</div></div><div class="lvlt">${esc(title())}</div><div class="lvltn"><b>${cur.toLocaleString('en-US')}</b> tendies</div></div>
+    <div class="lvlbar"><b>${lv}</b><div class="meter"><i style="width:${pc}%"></i></div><b>${lv + 1}</b></div>
+    <div class="lvllbl"><span>${lo}</span><b>${cur} of ${hi}</b><span>${hi}</span></div>
+    <div class="titles">${TITLES.map((t, i) => `<span class="${i < lv ? 'past' : i === lv ? 'now' : ''}">${i}. ${esc(t)}</span>`).join('')}</div></div>
+  <h3>Today</h3><div class="cards">${qs.map(q => questCard(q.t, q.d, q.r, q.pr, q.p, q.claimed, q.ok, 'data-claim="' + q.id + '"')).join('')}</div>
+  <h3>Special quests</h3><div class="cards">${Object.keys(BADGES).map(k => { const got = !!S.badges[k]; return `<div class="card ${got ? 'got-' + BADGES[k][1] : ''}"><div class="card-h"><span class="qt">${BADGES[k][0]}</span><span class="reward">+30</span></div><div class="qd">${BADGE_INFO[k]}</div><div class="card-f"><span class="${got ? 'b' : ''}">${got ? 'Done' : 'Not yet'}</span></div></div>`; }).join('')}</div>
+  <h3>Shop</h3><div class="cards">
+    ${shopCard('Lawyer', 'Wipes the next SEC fine.', LAWYER, 'lawyer', (S.lawyers || 0) ? `${S.lawyers} on retainer` : '')}
+    ${shopCard('Bail', 'Walk out of jail right now.', BAIL, 'bail', inJail() ? '' : 'Not in jail', !inJail())}
+  </div>`;
+}
+function questCard(t, d, r, pr, prog, claimed, ok, attr) {
+  return `<div class="card"><div class="card-h"><span class="qt">${esc(t)}</span><span class="reward">+${r}</span></div><div class="qd">${esc(d)}</div><div class="meter"><i style="width:${Math.round(pr * 100)}%"></i></div>
+    <div class="card-f"><b>${esc(prog)}</b>${claimed ? '<span class="gray">Claimed</span>' : `<button class="${ok ? 'go' : ''}" ${attr} ${ok ? '' : 'disabled'}>Claim</button>`}</div></div>`;
+}
+function shopCard(t, d, cost, key, note, off) {
+  const can = S.tendies >= cost && !off;
+  return `<div class="card"><div class="card-h"><span class="qt">${t}</span><b>${cost}</b></div><div class="qd">${d}</div>
+    <div class="card-f"><span class="gray">${esc(note || '')}</span><button data-buy="${key}" ${can ? '' : 'disabled'}>${off ? 'Unavailable' : can ? cost + ' tendies' : 'Needs ' + cost}</button></div></div>`;
+}
+function vNoSource() {
+  const ev = E && E.events.find(x => x.id === arg);
+  if (!ev) { main.innerHTML = '<div class="empty">Loading...</div>'; if (E) location.hash = '#feed'; return; }
+  const moves = chips(ev);
+  main.innerHTML = `<div class="crumb"><a href="#feed">Feed</a> / No source</div>
+  <h2>Wait a minute</h2>
+  <div class="why"><div>Is this misinformation?</div><div>Is misinformation driving the market?</div><div class="down">There is no source???</div></div>
+  <div class="card" style="margin-bottom:var(--c)"><div class="gray">The headline</div><div class="qt" style="font-size:var(--m);white-space:normal">${esc(ev.head)}</div><div class="gray">${esc(ev.dek || '')}</div></div>
+  <h3>Source check</h3>
+  <table class="chk"><tbody>
+    <tr><td>Outlet</td><td><b class="down">None</b></td></tr>
+    <tr><td>Author</td><td><b class="down">None</b></td></tr>
+    <tr><td>Link</td><td><b class="down">Nowhere to go</b></td></tr>
+    <tr><td>Company</td><td><b>Invented, like the rest of this</b></td></tr>
+    <tr><td>Evidence</td><td><b>A feeling</b></td></tr>
+    <tr><td>Posted</td><td><b>${ago(ev.t)}</b></td></tr>
+  </tbody></table>
+  <h3>The market did not check either</h3><div class="chips" style="margin-bottom:var(--c)">${moves || '<span class="gray">Nothing moved. Lucky.</span>'}</div>
+  <div class="lead">Headlines marked <b>Real news</b> open the story they came from. This one has nothing behind it, and prices moved anyway.</div>
+  <div class="row-btns" style="margin-top:var(--c)"><a class="btnlink" href="#feed">Back to the feed</a></div>`;
 }
 async function vBoard() {
   main.innerHTML = '<h2>Wen Lambo</h2><div class="empty">Loading...</div>';
@@ -502,12 +534,13 @@ async function vBoard() {
   ${list.length ? `<table class="bd"><thead><tr><th>#</th><th>Player</th><th>Net worth</th><th>Status</th></tr></thead><tbody>${list.map((x, i) => `<tr class="${S.acct && x.u === S.acct.u ? 'me' : ''}"><td>${i + 1}</td><td class="nmcell">${esc(x.u)}</td><td>${money(x.nw)}</td><td>${esc(ladder(x.nw / START - 1)[0])}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">Nobody yet. Be first.</div>'}`;
 }
 function render() {
-  if (route === 'feed') vFeed(); else if (route === 'market') vMarket(); else if (route === 'co') vCompany(); else if (route === 'portfolio') vPortfolio(); else if (route === 'quests') vQuests(); else if (route === 'board') vBoard(); else { location.hash = '#feed'; }
+  if (route === 'feed') vFeed(); else if (route === 'market') vMarket(); else if (route === 'co') vCompany(); else if (route === 'portfolio') vPortfolio(); else if (route === 'quests') vQuests(); else if (route === 'board') vBoard(); else if (route === 'nosource') vNoSource(); else { location.hash = '#feed'; }
   renderMe(); renderTape();
 }
 function renderMe() {
   const r = M ? ret() : 0, l = ladder(r), el = $('#me');
   el.innerHTML = `<div class="nw" id="menw">${M ? money(netWorth()) : ''}</div><div class="ladder ${l[1]}" id="meladder">${M ? l[0] : ''}</div>
+  <div class="tn"><b id="metn">${S.tendies.toLocaleString('en-US')}</b> tendies</div>
   <div class="who">${esc(S.name)} <button id="openset">Settings</button></div>`;
 }
 function applyTheme() {
@@ -516,12 +549,11 @@ function applyTheme() {
   const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = dark ? '#0c0d0b' : '#f3f0e7';
 }
 function accountHTML() {
-  if (S.acct) return `<div style="margin-bottom:var(--a)">Signed in as <b>${esc(S.acct.u)}</b>. Your portfolio is saved to your account and follows you to other devices.</div>
-    ${lastCode ? `<div class="note"><div class="b">Your recovery code: ${esc(lastCode)}</div>Write it down. It is the only way to reset a forgotten password, and it is not shown again.</div>` : ''}
+  if (S.acct) return `<div style="margin-bottom:var(--a)">Signed in as <b>${esc(S.acct.u)}</b></div>
+    ${lastCode ? `<div class="note"><div class="gray">Recovery code, shown once</div><div class="b" style="font-size:var(--m)">${esc(lastCode)}</div></div>` : ''}
     <div class="row-btns"><button id="signout">Sign out</button><button class="stop" id="delacct">Delete account</button></div><div class="gray" id="accmsg" style="margin-top:var(--a)">${esc(accMsg)}</div>`;
   const rec = accMode === 'rec';
-  return `<div class="gray" style="margin-bottom:var(--a)">Optional. An account puts you on the Wen Lambo leaderboard and saves your portfolio across devices.</div>
-    <div class="acc"><input id="au" maxlength="16" placeholder="Username" autocomplete="username" autocapitalize="off" spellcheck="false">
+  return `<div class="acc"><input id="au" maxlength="16" placeholder="Username" autocomplete="username" autocapitalize="off" spellcheck="false">
     ${rec ? '<input id="ac" maxlength="12" placeholder="Recovery code" autocomplete="off" autocapitalize="off" spellcheck="false">' : ''}
     <input id="ap" type="password" maxlength="64" placeholder="${rec ? 'New password' : 'Password'}" autocomplete="${rec ? 'new-password' : 'current-password'}"></div>
     <div class="row-btns">${rec ? '<button class="go" data-acc="rec">Reset password</button><button data-acc-mode="in">Back</button>' : '<button class="go" data-acc="in">Sign in</button><button data-acc="up">Create account</button><button data-acc-mode="rec">Forgot</button>'}</div>
@@ -532,7 +564,7 @@ function settingsHTML() {
   <h3>Account</h3>${accountHTML()}
   ${S.acct ? '' : `<h3>Name</h3><form class="nm-edit" id="nmform"><input id="nmin" maxlength="16" value="${esc(S.name)}" autocomplete="off"><button class="go">Save</button></form>`}
   <h3>Theme</h3><div class="row-btns">${['dark', 'light', 'system'].map(t => `<button data-theme="${t}" class="${(S.theme || 'dark') === t ? 'on' : ''}">${t}</button>`).join('')}</div>
-  <h3>Alerts</h3><div class="gray" style="margin-bottom:var(--a)">A notification when news hits something you own. Works while the game is open in a tab.</div>
+  <h3>Alerts</h3>
   <button id="alerts" class="${S.notify ? 'go' : ''}">Alerts ${S.notify ? 'on' : 'off'}</button>
   <h3>Fine print</h3><div class="gray">Every company here is made up. The news is real, the market is not. Prices move on headlines from the last hour or so. You cannot lose real money. Options can expire worthless and put you in debt, and debt ends in jail.</div></div>`;
 }
@@ -559,7 +591,7 @@ document.addEventListener('click', e => {
       let hint = 'u'; try { hint = atob(u.k).charAt(1); } catch (er) { }
       S.tendies -= TIP_COST; S.tips[u.id] = hint; give('tipster');
       let msg = '';
-      if (Math.random() < 0.25) { const f = Math.min(S.cash, netWorth() * 0.12); S.cash -= f; S.fines += f; give('martha'); msg = `The SEC noticed. Fine: ${money(f)}.`; }
+      if (Math.random() < 0.25) { if ((S.lawyers || 0) > 0) { S.lawyers--; msg = 'The SEC noticed. Your lawyer made it go away.'; } else { const f = Math.min(S.cash, netWorth() * 0.12); S.cash -= f; S.fines += f; give('martha'); msg = `The SEC noticed. Fine: ${money(f)}.`; } }
       save(); render(); const m = $('#tipmsg'); if (m) m.textContent = msg; return;
     }
     if (b.dataset.range) { rangeSel = b.dataset.range; document.querySelectorAll('.ranges button').forEach(x => x.classList.toggle('on', x === b)); drawChart(arg); return; }
@@ -611,11 +643,14 @@ document.addEventListener('click', e => {
     if (b.id === 'openset') { openSettings(); return; }
     if (b.id === 'closeset') { closeSettings(); return; }
     if (b.dataset.theme) { S.theme = b.dataset.theme; save(); applyTheme(); openSettings(); return; }
+    if (b.dataset.buy) { const k = b.dataset.buy; if (k === 'lawyer' && S.tendies >= LAWYER) { S.tendies -= LAWYER; S.lawyers = (S.lawyers || 0) + 1; save(); render(); renderMe(); } if (k === 'bail' && S.tendies >= BAIL && inJail()) { S.tendies -= BAIL; S.jailUntil = 0; save(); render(); renderMe(); } return; }
+    if (b.id === 'bail') { if (S.tendies >= BAIL && inJail()) { S.tendies -= BAIL; S.jailUntil = 0; save(); render(); renderMe(); } return; }
     if (b.id === 'donate') { donate(); render(); renderMe(); return; }
     return;
   }
   if (ev && !t.closest('a')) {
     const d = today();
+    if (ev.dataset.nosrc) { S.read[d] = (S.read[d] || 0) + 1; save(); location.hash = '#nosource/' + encodeURIComponent(ev.dataset.nosrc); return; }
     if (ev.dataset.url) { window.open(ev.dataset.url, '_blank', 'noopener,noreferrer'); S.read[d] = (S.read[d] || 0) + 1; save(); }
     else { ev.classList.toggle('open'); if (ev.classList.contains('open')) { S.read[d] = (S.read[d] || 0) + 1; save(); } }
   }
@@ -652,6 +687,7 @@ function tick() {
   document.querySelectorAll('[data-cd]').forEach(el => { el.textContent = countdown(Number(el.dataset.cd) - Date.now()); });
   const nw = netWorth(), r = ret(), l = ladder(r);
   const a = $('#menw'); if (a) a.textContent = money(nw);
+  const tn = $('#metn'); if (tn) tn.textContent = S.tendies.toLocaleString('en-US');
   const b = $('#meladder'); if (b) { b.textContent = l[0]; b.className = 'ladder ' + l[1]; }
   const pn = $('#pfnw'); if (pn) { pn.textContent = money(nw); $('#pfret').textContent = pct(r); $('#pfret').className = 'v ' + cls(r); $('#pfladder').textContent = l[0]; $('#pfladder').className = 'huge ' + l[1]; $('#pfinv').textContent = money(posValue()); }
   const tv = $('#tval'); if (tv && S.pos[arg]) tv.textContent = money(S.pos[arg].sh * shown(arg));

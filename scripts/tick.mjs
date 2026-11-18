@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { buildWorld, SECTORS } from './world.mjs';
 import { FEEDS, fetchFeed, classify } from './news.mjs';
+import { macroReturn, marketReturn } from './history.mjs';
 import { GOOD, BAD, SECTOR_GOOD, SECTOR_BAD, MARKET_GOOD, MARKET_BAD, DEKS, WILD, BRRR, SCHED } from './templates.mjs';
 
 const dir = process.argv[2] || 'data';
@@ -51,7 +52,7 @@ for (const [from, to] of Object.entries({ TWLN: 'DOUG' })) {
   for (const m of [market, H.w, H.m, H.d]) if (m.c && m.c[from] && !m.c[to]) { m.c[to] = m.c[from]; delete m.c[from]; }
 }
 const seen = new Set(st.seen);
-let vmul = 1;                       // volatility of the minutes being simulated (a wild minute is a spike)
+let vmul = 1, extra = {}, seeding = false, seedT = 0;      // extra: log return per sector the real curves ask for in this stretch                       // volatility of the minutes being simulated (a wild minute is a spike)
 
 // ---- helpers for events
 function fill(t, c, c2) {
@@ -155,7 +156,9 @@ function advance(minutes) {
       const sec = secInfo[c.s];
       let r = vm * (0.65 * gauss() + 0.55 * sf[c.s] * sec.beta + 0.5 * zm);
       r += st.o[c.t] * 0.04 * dt; st.o[c.t] *= Math.pow(0.96, dt);
-      r += 0.0005 * dt * Math.log(c.p / st.p[c.t]);
+      if (!seeding) r += 0.0005 * dt * Math.log(c.p / st.p[c.t]);
+      else r += 0.00002 * dt * (Math.log(c.p) + macroReturn(c.s, now, seedT) - Math.log(st.p[c.t]));   // the past follows the real curves, with room to wander
+      r += (extra[c.s] || 0) / steps;
       st.p[c.t] = Math.min(5000, Math.max(1, st.p[c.t] * Math.exp(r)));
     }
   }
@@ -218,7 +221,9 @@ function upcoming() {
 }
 function seedWalk(from, to, step, wild) {
   for (let t = from + step; t <= to; t += step) {
-    vmul = 1; advance(step / 60e3);
+    for (const sct of SECTORS) extra[sct.id] = macroReturn(sct.id, t - step, t);
+    seedT = t; vmul = 0.5 * (1 + Math.min(2, 25 * Math.abs(marketReturn(t - step, t))));        // calmer than the live game, noisier in a crash
+    advance(step / 60e3);
     if (wild && rnd() < wild * step / 86400e3) { const e = wildEvent(); e.t = t; land([e]); if (now - t < 72 * 3600e3) events.unshift(e); }
     for (const sl of slotsBetween(t - step, t)) { const e = slotEvent(sl); land([e]); if (now - t < 72 * 3600e3) events.unshift(e); }
     record(t);
@@ -227,10 +232,17 @@ function seedWalk(from, to, step, wild) {
 if (fresh) {
   // three pretend years of history: days first, then two hours, thirty minutes and five minutes toward now
   const D = 86400e3, t0 = now - 1095 * D;
-  seedWalk(t0, now - 30 * D, D, 3);
-  seedWalk(now - 30 * D, now - 7 * D, 2 * 3600e3, 3);
-  seedWalk(now - 7 * D, now - D, 30 * 60e3, 3);
-  seedWalk(now - D, now - 5 * 60e3, 5 * 60e3, 3);
+  seeding = true;
+  for (const c of back) st.p[c.t] = c.p * Math.exp(macroReturn(c.s, now, t0));     // start where the real curves say it was
+  seedWalk(t0, now - 30 * D, D, 1.5);
+  seedWalk(now - 30 * D, now - 7 * D, 2 * 3600e3, 1.5);
+  seedWalk(now - 7 * D, now - D, 30 * 60e3, 1.5);
+  seedWalk(now - D, now - 5 * 60e3, 5 * 60e3, 1.5);
+  seeding = false; extra = {}; vmul = 1;
+  // every company ends the past at its starting price, so the long charts finish where the game begins
+  for (const c of back) { const f = c.p / st.p[c.t]; st.p[c.t] *= f; for (const m of [market, H.w, H.m, H.d]) { const a = m.c[c.t]; for (let j = 0; j < a.length; j++) a[j] = Math.round(a[j] * f); } }
+  for (const m of [market, H.w, H.m, H.d]) for (const i of idx) { const a = m.c[i.t]; for (let j = 0; j < m.ts.length; j++) a[j] = Math.round(i.base * i.m.reduce((acc, t) => acc + m.c[t][j] / 100, 0) / i.p0 * 100); }
+  syncIdx();
   st.t = now - 5 * 60e3; st.lastRun = now - 5 * 60e3;
   events.sort((a, b) => b.t - a.t);
 }
