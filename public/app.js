@@ -524,7 +524,7 @@ function vPortfolio() {
   ${hs.length ? `<table><thead><tr><th>Holding</th><th>Shares</th><th>Value</th><th>Gain</th></tr></thead><tbody>${hs.sort((a, b) => S.pos[b].sh * shown(b) - S.pos[a].sh * shown(a)).map(t => {
     const p = S.pos[t], v = p.sh * shown(t), g = v / p.cost - 1;
     return `<tr class="row" data-go="co/${t}"><td><span class="nmrow"><span><span class="b">${t}</span><span class="nm">${esc((co[t] || {}).n || '')}</span></span>${g <= -0.3 ? '<span class="badge shame">Bagholder</span>' : ''}</span></td><td>${num(p.sh, 3)}</td><td>${money(v)}</td><td class="${cls(g)}">${pct(g)}</td></tr>`;
-  }).join('')}</tbody></table>` : '<div class="empty">You don't own anything yet. Cash does not make Big Stonks.</div>'}
+  }).join('')}</tbody></table>` : '<div class="empty">You do not own anything yet. Cash does not make Big Stonks.</div>'}
   ${hs.length ? `<h3>Where it sits</h3><div class="bars">${Object.entries(sectors).sort((a, b) => b[1] - a[1]).map(([s, v]) => `<div class="bb"><span>${esc(secName[s] || s)}</span><span class="t"><i style="width:${v / tot * 100}%"></i></span><span>${(v / tot * 100).toFixed(0)}%</span></div>`).join('')}</div>` : ''}
   ${S.fines ? `<div class="gray" style="margin-top:var(--b)">Fined by the SEC so far: ${money(S.fines)}.</div>` : ''}
   ${optionsPortfolioHTML()}`;
