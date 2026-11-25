@@ -524,7 +524,7 @@ function vPortfolio() {
   ${hs.length ? `<table><thead><tr><th>Holding</th><th>Shares</th><th>Value</th><th>Gain</th></tr></thead><tbody>${hs.sort((a, b) => S.pos[b].sh * shown(b) - S.pos[a].sh * shown(a)).map(t => {
     const p = S.pos[t], v = p.sh * shown(t), g = v / p.cost - 1;
     return `<tr class="row" data-go="co/${t}"><td><span class="nmrow"><span><span class="b">${t}</span><span class="nm">${esc((co[t] || {}).n || '')}</span></span>${g <= -0.3 ? '<span class="badge shame">Bagholder</span>' : ''}</span></td><td>${num(p.sh, 3)}</td><td>${money(v)}</td><td class="${cls(g)}">${pct(g)}</td></tr>`;
-  }).join('')}</tbody></table>` : '<div class="empty">Nothing owned. Cash does not make Big Stonks.</div>'}
+  }).join('')}</tbody></table>` : '<div class="empty">You don't own anything yet. Cash does not make Big Stonks.</div>'}
   ${hs.length ? `<h3>Where it sits</h3><div class="bars">${Object.entries(sectors).sort((a, b) => b[1] - a[1]).map(([s, v]) => `<div class="bb"><span>${esc(secName[s] || s)}</span><span class="t"><i style="width:${v / tot * 100}%"></i></span><span>${(v / tot * 100).toFixed(0)}%</span></div>`).join('')}</div>` : ''}
   ${S.fines ? `<div class="gray" style="margin-top:var(--b)">Fined by the SEC so far: ${money(S.fines)}.</div>` : ''}
   ${optionsPortfolioHTML()}`;
@@ -572,7 +572,7 @@ function vNoSource() {
     <tr><td>Evidence</td><td><b>A feeling</b></td></tr>
     <tr><td>Posted</td><td><b>${ago(ev.t)}</b></td></tr>
   </tbody></table>
-  <h3>The market did not check either</h3><div class="chips" style="margin-bottom:var(--c)">${moves || '<span class="gray">Nothing moved. Lucky.</span>'}</div>
+  <h3>The market did not check either</h3><div class="chips" style="margin-bottom:var(--c)">${moves || '<span class="gray">Nothing moved, luckily.</span>'}</div>
   <div class="lead">Headlines marked <b>Real news</b> open the story they came from. This one has nothing behind it, and prices moved anyway.</div>
   <div class="row-btns" style="margin-top:var(--c)"><a class="btnlink" href="#feed">Back to the feed</a></div>`;
 }
@@ -698,7 +698,7 @@ function mailAct(id, k) {
   let res = '';
   if (m.type === 'claim') {
     if (k === 'approve') { if (m.fraud) { const c = Math.min(S.cash, m.amt * 0.5); S.cash -= c; res = `It was fraud. Your share of the payout: ${money(c)}.`; } else { earn(6); res = 'Paid. A customer is happy. +6 tendies.'; } }
-    else { if (m.fraud) { earn(10); res = 'Fraud caught. +10 tendies.'; } else if (Math.random() < 0.5) { const c = Math.min(S.cash, m.amt * 0.4); S.cash -= c; res = `It was legitimate. A bad faith complaint costs ${money(c)}.`; } else res = 'It was legitimate. They did not complain.'; }
+    else { if (m.fraud) { earn(10); res = 'You caught the fraud: +10 tendies.'; } else if (Math.random() < 0.5) { const c = Math.min(S.cash, m.amt * 0.4); S.cash -= c; res = `It was legitimate. A bad faith complaint costs ${money(c)}.`; } else res = 'It was legitimate. They did not complain.'; }
   } else if (m.type === 'scam') {
     if (k === 'click') { if (m.scam) { const c = Math.min(S.cash, 80 + Math.random() * 320); S.cash -= c; res = `It was a scam. ${money(c)} gone.`; } else res = 'Fine. It was a real notice.'; }
     else if (k === 'report') { if (m.scam) { earn(5); res = 'Scam reported. +5 tendies.'; } else res = 'False alarm. It was a real notice.'; }
@@ -838,7 +838,7 @@ document.addEventListener('click', e => {
     if (b.dataset.manip) {
       if (!S.acct || !S.manip) return; const dir = Number(b.dataset.manip), t0 = arg, msg = $('#mmsg'); msg.textContent = 'Sending...';
       api({ op: 'manip', u: S.acct.u, t: S.acct.t, tk: t0, dir, lv: level() }).then(r => {
-        if (r.ok) { S.manipNext = r.next; let m = 'Rumor sent. It lands within minutes.'; if (Math.random() < 0.35) { if ((S.lawyers || 0) > 0) { S.lawyers--; m += ' The SEC noticed, your lawyer fixed it.'; } else { const f = Math.min(S.cash, netWorth() * 0.08); S.cash -= f; S.fines += f; give('martha'); m += ` The SEC noticed. Fine: ${money(f)}.`; } } save(); renderMe(); if (route === 'co' && arg === t0) { vCompany(); const e = $('#mmsg'); if (e) e.textContent = m; } }
+        if (r.ok) { S.manipNext = r.next; let m = 'Your rumor is out and lands within minutes.'; if (Math.random() < 0.35) { if ((S.lawyers || 0) > 0) { S.lawyers--; m += ' The SEC noticed, your lawyer fixed it.'; } else { const f = Math.min(S.cash, netWorth() * 0.08); S.cash -= f; S.fines += f; give('martha'); m += ` The SEC noticed. Fine: ${money(f)}.`; } } save(); renderMe(); if (route === 'co' && arg === t0) { vCompany(); const e = $('#mmsg'); if (e) e.textContent = m; } }
         else { msg.textContent = r.error === 'cooldown' ? 'Not ready yet.' : 'Could not send. Try again.'; if (r.next) { S.manipNext = r.next; save(); } }
       }); return;
     }
